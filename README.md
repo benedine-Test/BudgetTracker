@@ -49,6 +49,8 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 - A second credit in the same cycle (claims, backpay) is added to that cycle's income.
 - Each period keeps the split that was set when it opened, so changing 50/30/20 → 60/20/20 doesn't rewrite past months.
 
+**Salary from base pay.** When recording salary, tick *Work out CPF from my base pay* to enter gross base pay instead of take-home. It deducts employee CPF (2026 rates by age band, S$8,000 wage ceiling, cents dropped as CPF does) and, if you pick one, your self-help fund (CDAC, MBMF, SINDA or ECF). Covers citizens and PRs from year three; bonuses, allowances and year-one/two PR rates aren't modelled. Your choices are remembered on the phone.
+
 **Categorisation.** About 60 seeded rules for common Singapore merchants (FairPrice, BUS/MRT, GrabFood vs Grab, SP Services…). When you correct one with `POST /api/transactions/{id}/categorise`, it learns a rule (e.g. `HANAMI RAMEN`) and re-files other unconfirmed matches.
 
 ## iPhone Shortcut (Apple Pay auto-capture)

@@ -1,4 +1,5 @@
 using Budget.Api.Services;
+using Budget.Web.Services;
 
 namespace Budget.Tests;
 
@@ -100,5 +101,48 @@ public class PayPeriodTests
         var (s, e) = PayPeriod.ForSalary(new DateOnly(2026, 12, 24), 25);
         Assert.Equal(new DateOnly(2026, 12, 24), s);
         Assert.Equal(new DateOnly(2027, 1, 25), e);
+    }
+}
+
+public class PayslipTests
+{
+    [Theory]
+    [InlineData(500, 0)]                // no employee share up to S$500
+    [InlineData(600, 60)]               // phase-in: 0.6 × (600 − 500)
+    [InlineData(750, 150)]
+    [InlineData(5000, 1000)]            // 20%
+    [InlineData(4567.89, 913)]          // cents dropped: 913.578
+    [InlineData(12000, 1600)]           // capped at the S$8,000 ceiling
+    public void Employee_cpf_up_to_55(decimal wage, decimal expected) =>
+        Assert.Equal(expected, Payslip.EmployeeCpf(wage, CpfAgeBand.UpTo55));
+
+    [Theory]
+    [InlineData(CpfAgeBand.Over55To60, 900)]
+    [InlineData(CpfAgeBand.Over60To65, 625)]
+    [InlineData(CpfAgeBand.Over65To70, 375)]
+    [InlineData(CpfAgeBand.Over70, 250)]
+    [InlineData(CpfAgeBand.NoCpf, 0)]
+    public void Employee_cpf_by_age_band(CpfAgeBand band, decimal expected) =>
+        Assert.Equal(expected, Payslip.EmployeeCpf(5000, band));
+
+    [Theory]
+    [InlineData(ShgFund.Cdac, 2000, 0.50)]
+    [InlineData(ShgFund.Cdac, 2000.01, 1.00)]
+    [InlineData(ShgFund.Cdac, 9000, 3.00)]
+    [InlineData(ShgFund.Mbmf, 3500, 15.00)]
+    [InlineData(ShgFund.Sinda, 4500, 7)]
+    [InlineData(ShgFund.Sinda, 20000, 30)]
+    [InlineData(ShgFund.Ecf, 1200, 4)]
+    [InlineData(ShgFund.None, 5000, 0)]
+    public void Shg_bands(ShgFund fund, decimal wage, decimal expected) =>
+        Assert.Equal(expected, Payslip.ShgContribution(wage, fund));
+
+    [Fact]
+    public void Take_home_is_base_less_cpf_and_shg()
+    {
+        var b = Payslip.From(4000, CpfAgeBand.UpTo55, ShgFund.Cdac);
+        Assert.Equal(800, b.EmployeeCpf);
+        Assert.Equal(1.50m, b.Shg);   // CDAC band above S$3,500 to S$5,000
+        Assert.Equal(3198.50m, b.TakeHome);
     }
 }

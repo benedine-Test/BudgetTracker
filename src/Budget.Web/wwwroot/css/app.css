@@ -247,6 +247,9 @@ form > .three:first-child label, form > .two:first-child label { margin-top: 0; 
 .inline input { flex: 1; min-width: 0; }
 .row.static { min-height: 56px; }
 .row.static label { margin: 0; font-weight: 500; font-size: 15px; }
+.payslip { padding: 0; margin-top: 12px; }
+.payslip .row { min-height: 0; padding: 8px 0; font-variant-numeric: tabular-nums; }
+.payslip .total { font-weight: 650; }
 .add-cat { margin-top: 6px; }
 
 .chips { display: flex; gap: 8px; }
