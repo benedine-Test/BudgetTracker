@@ -54,8 +54,25 @@ public static class Fmt
         "ApplePayShortcut" => "Apple Pay",
         "EmailAlert" => "Bank alert",
         "StatementImport" => "Statement",
+        "Recurring" => "Recurring",
         _ => "Entered by hand"
     };
+
+    /// <summary>"Monthly on the 1st", "Every 2 weeks on Mon", "Yearly on 3 Mar".</summary>
+    public static string Schedule(string frequency, int interval, DateOnly start) => frequency switch
+    {
+        "Weekly" => (interval == 1 ? "Weekly" : $"Every {interval} weeks") + $" on {start.ToString("ddd", Inv)}",
+        "Yearly" => (interval == 1 ? "Yearly" : $"Every {interval} years") + $" on {start.ToString("d MMM", Inv)}",
+        _ => (interval == 1 ? "Monthly" : $"Every {interval} months") + $" on the {Ordinal(start.Day)}"
+    };
+
+    private static string Ordinal(int n) => n + (n % 100 is 11 or 12 or 13 ? "th" : (n % 10) switch
+    {
+        1 => "st",
+        2 => "nd",
+        3 => "rd",
+        _ => "th"
+    });
 
     public static string AssetClass(string value) => value switch
     {

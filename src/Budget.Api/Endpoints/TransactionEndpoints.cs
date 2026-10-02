@@ -107,10 +107,11 @@ public static class TransactionEndpoints
             return Results.Ok(new { transaction = ToDto(other) });
         });
 
-        api.MapGet("/transactions", async (BudgetDbContext db, Clock clock,
+        api.MapGet("/transactions", async (BudgetDbContext db, Clock clock, RecurringService recurring,
             string? from, string? to, int? categoryId, string? bucket, bool? uncategorised, string? q, int? take,
             CancellationToken ct) =>
         {
+            await recurring.PostDueAsync(ct);
             var query = db.Transactions.AsNoTracking().Include(t => t.Category).AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(from))

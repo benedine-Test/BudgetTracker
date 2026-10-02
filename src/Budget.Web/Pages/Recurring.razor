@@ -1,0 +1,269 @@
+@page "/recurring"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Recurring</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Recurring</h1>
+        <p class="sub">Added for you on each due date</p>
+    </div>
+    <button type="button" class="btn primary small" @onclick="() => Edit(null)">Add</button>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (items is null)
+{
+    <Loading />
+}
+else if (items.Count == 0)
+{
+    <div class="card empty">
+        <p>Nothing set up yet. Add rent, insurance, phone bills, subscriptions or a monthly investment, and each one is logged automatically when it falls due.</p>
+        <button type="button" class="btn primary" @onclick="() => Edit(null)">Add your first one</button>
+    </div>
+}
+else
+{
+    <section class="card hero">
+        <p class="label">Committed each month</p>
+        <p class="big">@Fmt.Money(items.Where(i => i.IsActive).Sum(i => i.MonthlyEquivalent))</p>
+        <p class="sub">across @items.Count(i => i.IsActive) active @(items.Count(i => i.IsActive) == 1 ? "item" : "items")</p>
+    </section>
+
+    <section>
+        <div class="card rows">
+            @foreach (var r in items)
+            {
+                <button type="button" class="row" @onclick="() => Edit(r)">
+                    <span class="dot @Fmt.BucketClass(r.Bucket)" aria-hidden="true"></span>
+                    <span class="row-main">
+                        <span class="tx-name">@r.Name</span>
+                        <span class="muted">
+                            @Fmt.Schedule(r.Frequency, r.Interval, r.StartDate) · @r.Category
+                            @if (!r.IsActive)
+                            {
+                                <span class="tag warn">Paused</span>
+                            }
+                        </span>
+                    </span>
+                    <span class="row-end">
+                        <span class="num">@Fmt.Money(r.Amount)</span>
+                        @if (r.IsActive)
+                        {
+                            <span class="muted small">Next @Fmt.Day(r.NextDueDate)</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+        <p class="hint">If your bank alert or Apple Pay reports the same payment within 3 days, it is matched to the entry here and not counted twice. This needs the same amount and a similar name.</p>
+    </section>
+}
+
+@if (editing)
+{
+    <Sheet Title="@(editId is null ? "Add recurring" : "Edit recurring")" OnClose="() => editing = false">
+        <form @onsubmit="Save" @onsubmit:preventDefault>
+            <label for="r-name">Name</label>
+            <input id="r-name" type="text" autocapitalize="words" placeholder="Netflix, Rent, STI ETF" @bind="name" />
+            <p class="hint">Use the name your bank shows, so alerts match it.</p>
+
+            <label for="r-amount">Amount (S$)</label>
+            <input id="r-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
+
+            <label for="r-cat">Category</label>
+            <select id="r-cat" @bind="categoryId">
+                <option value="0">Choose a category</option>
+                @foreach (var group in CategoryGroups)
+                {
+                    <optgroup label="@group.Key">
+                        @foreach (var c in group)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </optgroup>
+                }
+            </select>
+
+            <div class="two">
+                <div>
+                    <label for="r-freq">Repeats</label>
+                    <select id="r-freq" @bind="frequency">
+                        <option value="Weekly">Weekly</option>
+                        <option value="Monthly">Monthly</option>
+                        <option value="Yearly">Yearly</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="r-every">Every</label>
+                    <input id="r-every" type="number" inputmode="numeric" min="1" max="52" step="1" @bind="interval" />
+                </div>
+            </div>
+
+            <label for="r-start">@(editId is null ? "First payment date" : "Schedule starts on")</label>
+            <input id="r-start" type="date" @bind="startDate" @bind:format="yyyy-MM-dd" />
+            <p class="hint">
+                @Fmt.Schedule(frequency, Math.Max(1, interval), startDate).
+                @if (editId is null && startDate < Fmt.Today)
+                {
+                    <text> Past dates are not added; it starts from the next one.</text>
+                }
+            </p>
+
+            <label for="r-end">Last payment date (optional)</label>
+            <input id="r-end" type="date" @bind="endDate" @bind:format="yyyy-MM-dd" />
+
+            <label for="r-notes">Note (optional)</label>
+            <input id="r-notes" type="text" @bind="notes" />
+
+            @if (editId is not null)
+            {
+                <label class="check">
+                    <input type="checkbox" @bind="isActive" />
+                    Active
+                </label>
+            }
+
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+            @if (editId is not null)
+            {
+                <button type="button" class="btn danger block" disabled="@busy" @onclick="Delete">
+                    @(confirmDelete ? "Tap again to remove for good" : "Remove")
+                </button>
+                <p class="hint">Removing stops future entries. Ones already added stay in Spending.</p>
+            }
+        </form>
+    </Sheet>
+}
+
+@code {
+    private List<RecurringDto>? items;
+    private List<CategoryDto> categories = [];
+    private string? error;
+
+    private bool editing;
+    private int? editId;
+    private string name = "";
+    private decimal? amount;
+    private int categoryId;
+    private string frequency = "Monthly";
+    private int interval = 1;
+    private DateOnly startDate = Fmt.Today;
+    private DateOnly? endDate;
+    private string? notes;
+    private bool isActive = true;
+    private string? formError;
+    private bool busy;
+    private bool confirmDelete;
+
+    private IEnumerable<IGrouping<string, CategoryDto>> CategoryGroups =>
+        categories.Where(c => !c.IsArchived && c.Bucket != "Income")
+            .OrderBy(c => c.Name).GroupBy(c => c.Bucket);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            categories = await Api.Categories();
+            items = await Api.Recurring();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private void Edit(RecurringDto? r)
+    {
+        editing = true;
+        formError = null;
+        confirmDelete = false;
+        editId = r?.Id;
+        name = r?.Name ?? "";
+        amount = Fmt.Trim(r?.Amount);
+        categoryId = r?.CategoryId ?? 0;
+        frequency = r?.Frequency ?? "Monthly";
+        interval = r?.Interval ?? 1;
+        startDate = r?.StartDate ?? Fmt.Today;
+        endDate = r?.EndDate;
+        notes = r?.Notes;
+        isActive = r?.IsActive ?? true;
+    }
+
+    private async Task Save()
+    {
+        if (busy) return;
+        formError = Validate();
+        if (formError is not null) return;
+
+        var body = new RecurringSave(name.Trim(), amount!.Value, categoryId, frequency, interval,
+            Fmt.Iso(startDate), endDate is { } e ? Fmt.Iso(e) : null,
+            string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(), isActive);
+
+        busy = true;
+        try
+        {
+            await Api.SaveRecurring(editId, body);
+            Toast.Show("Saved.");
+            editing = false;
+            await Load();
+        }
+        catch (ApiException ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private string? Validate()
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "Give it a name, such as Netflix or Rent.";
+        if (amount is not > 0) return "Enter an amount above zero.";
+        if (categoryId == 0) return "Choose a category.";
+        if (interval is < 1 or > 52) return "Repeat every 1 to 52.";
+        if (endDate is { } e && e < startDate) return "The last payment date is before the first.";
+        return null;
+    }
+
+    private async Task Delete()
+    {
+        if (editId is null || busy) return;
+        if (!confirmDelete)
+        {
+            confirmDelete = true;
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await Api.DeleteRecurring(editId.Value);
+            Toast.Show("Removed.");
+            editing = false;
+            await Load();
+        }
+        catch (ApiException ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

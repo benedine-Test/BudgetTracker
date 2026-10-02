@@ -37,6 +37,13 @@ public record CategoriseResult(TransactionDto Transaction, string? LearnedPatter
 public record HoldingSave(string Symbol, string Name, string AssetClass, string? Platform,
     decimal Units, decimal AverageCost, string Currency, decimal? LastPrice, decimal FxToBase);
 
+public record RecurringDto(int Id, string Name, decimal Amount, int CategoryId, string? Category, string? Bucket,
+    string Frequency, int Interval, DateOnly StartDate, DateOnly? EndDate, DateOnly NextDueDate,
+    DateOnly? LastPostedDate, bool IsActive, string? Notes, decimal MonthlyEquivalent);
+
+public record RecurringSave(string Name, decimal Amount, int CategoryId, string Frequency, int Interval,
+    string StartDate, string? EndDate, string? Notes, bool IsActive);
+
 /// <summary>A problem worth showing to the person using the app, in plain words.</summary>
 public class ApiException(string message) : Exception(message);
 
@@ -90,6 +97,14 @@ public class Api(HttpClient http)
         using var r = await Send(HttpMethod.Get, "api/export/transactions.csv");
         return await r.Content.ReadAsByteArrayAsync();
     }
+
+    // ---- Recurring ----
+    public Task<List<RecurringDto>> Recurring() => Get<List<RecurringDto>>("api/recurring");
+
+    public Task SaveRecurring(int? id, RecurringSave r) =>
+        id is null ? Send(HttpMethod.Post, "api/recurring", r) : Send(HttpMethod.Put, $"api/recurring/{id}", r);
+
+    public Task DeleteRecurring(int id) => Send(HttpMethod.Delete, $"api/recurring/{id}");
 
     // ---- Categories ----
     public Task<List<CategoryDto>> Categories() => Get<List<CategoryDto>>("api/categories");

@@ -15,7 +15,8 @@ public enum TransactionSource
     Manual = 0,
     ApplePayShortcut = 1,
     EmailAlert = 2,
-    StatementImport = 3
+    StatementImport = 3,
+    Recurring = 4      // posted automatically from a RecurringItem
 }
 
 public class Category
@@ -128,4 +129,39 @@ public class Holding
     public DateTime? LastPriceAtUtc { get; set; }
     /// <summary>FX rate Currency → base currency. 1 for SGD holdings.</summary>
     public decimal FxToBase { get; set; } = 1m;
+}
+
+public enum RecurringFrequency
+{
+    Weekly = 0,
+    Monthly = 1,
+    Yearly = 2
+}
+
+/// <summary>
+/// A bill, subscription or standing investment that repeats on a schedule
+/// (rent on the 1st, Netflix monthly, S$500 into an ETF every payday).
+/// Each due date posts a spend transaction automatically.
+/// </summary>
+public class RecurringItem
+{
+    public int Id { get; set; }
+    /// <summary>Becomes the transaction's merchant, so keep it close to what the bank shows ("NETFLIX", "Town Council").</summary>
+    public string Name { get; set; } = "";
+    public decimal Amount { get; set; }
+    public int CategoryId { get; set; }
+    public Category? Category { get; set; }
+
+    public RecurringFrequency Frequency { get; set; } = RecurringFrequency.Monthly;
+    /// <summary>Every N weeks/months/years. 1 = every one.</summary>
+    public int Interval { get; set; } = 1;
+    /// <summary>The schedule's anchor. Occurrences are counted from here, so the 31st stays the 31st (or month-end) every month.</summary>
+    public DateOnly StartDate { get; set; }
+    /// <summary>Last date it may post on, inclusive. Null = until stopped.</summary>
+    public DateOnly? EndDate { get; set; }
+
+    public DateOnly NextDueDate { get; set; }
+    public DateOnly? LastPostedDate { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string? Notes { get; set; }
 }

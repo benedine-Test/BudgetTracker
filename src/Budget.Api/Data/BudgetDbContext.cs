@@ -10,6 +10,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<BudgetPeriod> BudgetPeriods => Set<BudgetPeriod>();
     public DbSet<AppSettings> Settings => Set<AppSettings>();
     public DbSet<Holding> Holdings => Set<Holding>();
+    public DbSet<RecurringItem> RecurringItems => Set<RecurringItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -46,6 +47,13 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(h => h.AverageCost).HasPrecision(18, 6);
             e.Property(h => h.LastPrice).HasPrecision(18, 6);
             e.Property(h => h.FxToBase).HasPrecision(18, 6);
+        });
+
+        b.Entity<RecurringItem>(e =>
+        {
+            e.Property(r => r.Amount).HasPrecision(18, 2);
+            e.Property(r => r.Name).HasMaxLength(200);
+            e.HasIndex(r => r.NextDueDate);
         });
     }
 }

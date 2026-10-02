@@ -19,14 +19,16 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
         decimal amount, string currency, string merchant, string? cardName,
         DateTime occurredAtUtc, TransactionSource source, string? notes, CancellationToken ct = default)
     {
-        var from = occurredAtUtc - DuplicateWindow;
-        var to = occurredAtUtc + DuplicateWindow;
+        // Auto-posted bills are matched over a wider window: the debit rarely lands on the exact scheduled day.
+        var from = occurredAtUtc - RecurringService.MatchWindow;
+        var to = occurredAtUtc + RecurringService.MatchWindow;
 
         var candidates = await db.Transactions
             .Where(t => !t.IsIncome && t.OccurredAtUtc >= from && t.OccurredAtUtc <= to && t.Source != source)
             .ToListAsync(ct);
 
         var dup = candidates
+            .Where(t => t.Source == TransactionSource.Recurring || (t.OccurredAtUtc - occurredAtUtc).Duration() <= DuplicateWindow)
             .Where(t => t.Amount == amount && t.Currency == currency && MerchantText.LooksLikeSameMerchant(t.Merchant, merchant))
             .Where(t => t.MergedSources is null || !t.MergedSources.Contains(source.ToString()))
             .OrderBy(t => Math.Abs((t.OccurredAtUtc - occurredAtUtc).Ticks))
@@ -37,9 +39,14 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
             dup.MergedSources = string.IsNullOrEmpty(dup.MergedSources) ? source.ToString() : $"{dup.MergedSources},{source}";
             dup.CardName ??= cardName;
             if (string.IsNullOrWhiteSpace(dup.Merchant)) dup.Merchant = merchant;
+            var wasScheduled = dup.Source == TransactionSource.Recurring;
+            // The real charge beats the scheduled guess for when it happened.
+            if (wasScheduled) dup.OccurredAtUtc = occurredAtUtc;
             await db.SaveChangesAsync(ct);
             await db.Entry(dup).Reference(t => t.Category).LoadAsync(ct);
-            return new IngestResult(dup, true, $"Already logged: {Money(dup.Amount, dup.Currency)} at {dup.Merchant}.");
+            return new IngestResult(dup, true, wasScheduled
+                ? $"{Money(dup.Amount, dup.Currency)} at {merchant} matches recurring {dup.Merchant}. Already counted."
+                : $"Already logged: {Money(dup.Amount, dup.Currency)} at {dup.Merchant}.");
         }
 
         var tx = new Transaction

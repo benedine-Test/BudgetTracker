@@ -17,8 +17,10 @@ public static class BudgetEndpoints
     public static void MapBudgetEndpoints(this RouteGroupBuilder api)
     {
         // ---- Budget ----
-        api.MapGet("/budget/summary", async (string? date, BudgetService svc, Clock clock, CancellationToken ct) =>
+        api.MapGet("/budget/summary", async (string? date, BudgetService svc, RecurringService recurring, Clock clock, CancellationToken ct) =>
         {
+            // The hourly poster stops while the host sleeps, so catch up on bills due before showing totals.
+            await recurring.PostDueAsync(ct);
             var d = clock.Today;
             if (!string.IsNullOrWhiteSpace(date) && !DateOnly.TryParse(date, out d))
                 return Results.BadRequest(new { message = "date must be yyyy-MM-dd." });

@@ -25,6 +25,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Invest** — total value, gain/loss, mix by type, holdings. CPF and cash are entered as a single balance.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
+- **Recurring** (from Settings) — bills, subscriptions and regular investments that are logged automatically on each due date.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
 
@@ -40,6 +41,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 | Bank card alert email (parsed elsewhere) | `POST /api/ingest/card-alert` | ✅ endpoint ready — parsers depend on your banks |
 | Manual entry | `POST /api/transactions` | ✅ ready |
 | Salary / other income | `POST /api/income` | ✅ ready |
+| Recurring bills / investments | `POST /api/recurring` | ✅ ready — posted automatically when due |
 | Statement CSV import | — | ⏳ next, bank-specific |
 
 **De-duplication.** If the Shortcut and a bank email both report the same purchase (same amount + currency, within 30 min, similar merchant), the second one is merged, not doubled. Two identical taps from the *same* source are kept as two — two coffees are two coffees.
@@ -50,6 +52,14 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 - Each period keeps the split that was set when it opened, so changing 50/30/20 → 60/20/20 doesn't rewrite past months.
 
 **Categorisation.** About 60 seeded rules for common Singapore merchants (FairPrice, BUS/MRT, GrabFood vs Grab, SP Services…). When you correct one with `POST /api/transactions/{id}/categorise`, it learns a rule (e.g. `HANAMI RAMEN`) and re-files other unconfirmed matches.
+
+**Recurring items.** Set up rent, insurance, subscriptions or a monthly ETF buy once; each due date adds a spend in its category (an Investments item counts towards Savings).
+- Schedules are weekly, monthly or yearly, every N. Monthly dates are counted from the first date, so the 31st becomes 28 Feb and then 31 Mar again.
+- Posting runs hourly *and* whenever the Budget or Spending screen loads. If the free Azure plan put the site to sleep, missed dates are caught up then.
+- New items start from the next due date on or after today. Earlier dates are not back-filled.
+- If a bank alert or Apple Pay tap reports the same payment (same amount, similar name, within 3 days), it is merged with the scheduled entry instead of being counted twice. Bills whose amount changes every month (electricity) won't match, so leave those to the bank alerts.
+- Removing or pausing an item stops future entries; ones already posted stay in Spending.
+- Investment items log the money going out but do not change holdings on the Invest screen.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -95,6 +105,7 @@ Things to check in your first week:
 | GET | `/api/holdings` | Portfolio: cost, value, P/L, allocation, stale-price flags |
 | POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase}` |
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
+| GET/POST/PUT/DELETE | `/api/recurring[/{id}]` | `{name, amount, categoryId, frequency: "Weekly"\|"Monthly"\|"Yearly", interval, startDate, endDate?, notes?, isActive?}` |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
 
 **Budget buckets.** Savings-bucket categories (Investments, Emergency Fund, Savings Goals) count as *contributions*, so you can see progress toward the 20%. Transfer and Income categories never count as spend.
@@ -110,11 +121,11 @@ Things to check in your first week:
 - **Cheaper:** a small container host (Fly.io, Railway) keeping SQLite on a persistent volume.
 - Either way: HTTPS only, and keep the key out of source control.
 
-**Before the schema changes on a live database,** switch `EnsureCreated` to EF migrations (`dotnet ef migrations add Initial`).
+**Schema changes on a live database.** `EnsureCreated` never adds tables to an existing database, so new tables (so far: `RecurringItems`) are created on start-up by `Data/SchemaUpgrade.cs`. Before the next change to an *existing* table, switch to EF migrations (`dotnet ef migrations add Initial`).
 
 ## Next steps
 
 1. Bank email parsers — depends on which banks and cards are used.
 2. Statement CSV import for reconciliation.
-3. Recurring bill / subscription detection.
+3. Suggest recurring items from spending history (same payee and amount every month).
 4. Automatic price and FX refresh.

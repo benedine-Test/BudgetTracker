@@ -10,8 +10,8 @@ public class Clock
         _tz = TimeZoneInfo.FindSystemTimeZoneById(id);
     }
 
-    public DateTime UtcNow => DateTime.UtcNow;
-    public DateOnly Today => ToLocalDate(DateTime.UtcNow);
+    public virtual DateTime UtcNow => DateTime.UtcNow; // virtual so tests can pin "now"
+    public DateOnly Today => ToLocalDate(UtcNow);
 
     public DateOnly ToLocalDate(DateTime utc) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _tz));
