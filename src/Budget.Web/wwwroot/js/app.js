@@ -24,7 +24,13 @@ window.budget = {
             else localStorage.removeItem('budget.key');
         } catch { /* storage unavailable */ }
     },
-
+    // Small remembered choices (e.g. CPF age band). Same quiet failure as the key.
+    getPref(name) {
+        try { return localStorage.getItem('budget.pref.' + name); } catch { return null; }
+    },
+    setPref(name, value) {
+        try { localStorage.setItem('budget.pref.' + name, value); } catch { /* storage unavailable */ }
+    },
     // Hands a file to the phone: the share sheet where available, otherwise a normal download.
     async saveFile(name, type, base64) {
         const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));

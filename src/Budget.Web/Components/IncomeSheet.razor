@@ -1,5 +1,6 @@
 @inject Api Api
 @inject Toast Toast
+@inject IJSRuntime JS
 
 <Sheet Title="Record income" OnClose="OnClose">
     <form @onsubmit="Save" @onsubmit:preventDefault>
@@ -10,8 +11,62 @@
             <option value="refund">Refund</option>
         </select>
 
-        <label for="inc-amount">@(kind == "salary" ? "Take-home pay, after CPF (S$)" : "Amount (S$)")</label>
-        <input id="inc-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
+        @if (kind == "salary")
+        {
+            <label class="check">
+                <input type="checkbox" @bind="fromBase" />
+                <span>Work out CPF from my base pay</span>
+            </label>
+        }
+
+        @if (UseBase)
+        {
+            <label for="inc-base">Monthly base pay, before CPF (S$)</label>
+            <input id="inc-base" type="number" inputmode="decimal" step="0.01" min="0" @bind="basePay" @bind:event="oninput" />
+
+            <div class="two">
+                <div>
+                    <label for="inc-age">Your age</label>
+                    <select id="inc-age" @bind="ageBand">
+                        <option value="@CpfAgeBand.UpTo55">55 and below</option>
+                        <option value="@CpfAgeBand.Over55To60">Above 55 to 60</option>
+                        <option value="@CpfAgeBand.Over60To65">Above 60 to 65</option>
+                        <option value="@CpfAgeBand.Over65To70">Above 65 to 70</option>
+                        <option value="@CpfAgeBand.Over70">Above 70</option>
+                        <option value="@CpfAgeBand.NoCpf">No CPF (foreigner)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="inc-shg">Self-help fund</label>
+                    <select id="inc-shg" @bind="shg">
+                        <option value="@ShgFund.None">None / opted out</option>
+                        <option value="@ShgFund.Cdac">CDAC</option>
+                        <option value="@ShgFund.Mbmf">MBMF</option>
+                        <option value="@ShgFund.Sinda">SINDA</option>
+                        <option value="@ShgFund.Ecf">ECF</option>
+                    </select>
+                </div>
+            </div>
+
+            @if (Breakdown is { } b)
+            {
+                <div class="rows payslip">
+                    <div class="row static"><span class="row-main">Base pay</span><span>@Fmt.Money(b.BasePay)</span></div>
+                    <div class="row static"><span class="row-main">CPF (@Fmt.Percent(b.CpfRatePct))</span><span>@Fmt.Money(-b.EmployeeCpf)</span></div>
+                    @if (shg != ShgFund.None)
+                    {
+                        <div class="row static"><span class="row-main">@Payslip.ShgName(shg)</span><span>@Fmt.Money(-b.Shg)</span></div>
+                    }
+                    <div class="row static total"><span class="row-main">Take-home</span><span>@Fmt.Money(b.TakeHome)</span></div>
+                </div>
+            }
+            <p class="hint">2026 rates for citizens and PRs from their third year. CPF stops at S$8,000 of pay. Bonuses and allowances aren't included — if your payslip shows a different take-home, untick this and type that instead.</p>
+        }
+        else
+        {
+            <label for="inc-amount">@(kind == "salary" ? "Take-home pay, after CPF (S$)" : "Amount (S$)")</label>
+            <input id="inc-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
+        }
 
         <label for="inc-date">Date received</label>
         <input id="inc-date" type="date" @bind="date" @bind:format="yyyy-MM-dd" />
@@ -42,10 +97,49 @@
     private string? error;
     private bool busy;
 
+    // Base-pay mode. Remembered on this phone so payday is one number.
+    private bool fromBase;
+    private decimal? basePay;
+    private CpfAgeBand ageBand = CpfAgeBand.UpTo55;
+    private ShgFund shg = ShgFund.None;
+
+    private bool UseBase => kind == "salary" && fromBase;
+    private PayslipBreakdown? Breakdown => basePay is > 0 ? Payslip.From(basePay.Value, ageBand, shg) : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            fromBase = await JS.InvokeAsync<string?>("budget.getPref", "salaryFromBase") == "1";
+            if (Enum.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "cpfAge"), out CpfAgeBand a)) ageBand = a;
+            if (Enum.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "shgFund"), out ShgFund f)) shg = f;
+            if (decimal.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "basePay"),
+                    System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var p)) basePay = p;
+        }
+        catch (JSException) { /* prefs are a convenience; defaults are fine */ }
+    }
+
     private async Task Save()
     {
         if (busy) return;
-        if (amount is not > 0)
+
+        decimal value;
+        var saveNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        if (UseBase)
+        {
+            if (Breakdown is not { TakeHome: > 0 } b)
+            {
+                error = "Enter your base pay above zero.";
+                return;
+            }
+            value = b.TakeHome;
+            saveNote ??= BreakdownNote(b);
+        }
+        else if (amount is > 0)
+        {
+            value = amount.Value;
+        }
+        else
         {
             error = "Enter an amount above zero.";
             return;
@@ -56,7 +150,8 @@
         try
         {
             // Midday keeps the entry on the chosen date whatever the time zone handling.
-            await Api.RecordIncome(amount.Value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", string.IsNullOrWhiteSpace(note) ? null : note.Trim());
+            await Api.RecordIncome(value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", saveNote);
+            if (kind == "salary") await RememberChoices();
             Toast.Show(kind == "salary" ? "Salary recorded. Budget updated." : "Income recorded.");
             await OnSaved.InvokeAsync();
         }
@@ -68,5 +163,24 @@
         {
             busy = false;
         }
+    }
+
+    private string BreakdownNote(PayslipBreakdown b)
+    {
+        var text = $"Base {Fmt.Money(b.BasePay)}, CPF {Fmt.Money(-b.EmployeeCpf)}";
+        return shg == ShgFund.None ? text : $"{text}, {Payslip.ShgName(shg)} {Fmt.Money(-b.Shg)}";
+    }
+
+    private async Task RememberChoices()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("budget.setPref", "salaryFromBase", fromBase ? "1" : "0");
+            if (!fromBase) return;
+            await JS.InvokeVoidAsync("budget.setPref", "cpfAge", ageBand.ToString());
+            await JS.InvokeVoidAsync("budget.setPref", "shgFund", shg.ToString());
+            await JS.InvokeVoidAsync("budget.setPref", "basePay", basePay!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (JSException) { /* not worth failing a saved salary over */ }
     }
 }
