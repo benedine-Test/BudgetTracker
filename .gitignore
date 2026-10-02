@@ -1,0 +1,16 @@
+# Visual Studio's private working files (locked while VS is open)
+.vs/
+*.user
+*.suo
+
+# Build output
+bin/
+obj/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# Publish settings that can hold sign-in details
+*.pubxml.user

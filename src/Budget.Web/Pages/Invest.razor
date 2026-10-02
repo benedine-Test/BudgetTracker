@@ -1,0 +1,332 @@
+@page "/invest"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Invest</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Invest</h1>
+        <p class="sub">Holdings, CPF and savings in one place</p>
+    </div>
+    <button type="button" class="btn primary small" @onclick="() => Edit(null)">Add</button>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (p is null)
+{
+    <Loading />
+}
+else if (p.Holdings.Count == 0)
+{
+    <div class="card empty">
+        <p>Nothing here yet. Add each holding with how many units you own and what you paid. CPF and cash go in as a single balance.</p>
+        <button type="button" class="btn primary" @onclick="() => Edit(null)">Add your first holding</button>
+    </div>
+}
+else
+{
+    <section class="card hero">
+        <p class="label">Total value</p>
+        <p class="big">@Fmt.Money(p.TotalValueBase)</p>
+        <p class="sub">
+            <span class="@(p.UnrealisedPnlBase < 0 ? "neg" : "pos")">
+                @Fmt.Signed(p.UnrealisedPnlBase)@(p.UnrealisedPnlPct is { } pct ? $" ({(pct > 0 ? "+" : "")}{Fmt.Percent(pct)})" : "")
+            </span>
+            on @Fmt.Money(p.TotalCostBase) put in
+        </p>
+    </section>
+
+    <section class="card">
+        <h2>Mix</h2>
+        <div class="stack" aria-hidden="true">
+            @for (var i = 0; i < p.Allocation.Count; i++)
+            {
+                <span class="slice s@(i % 7)" style="width:@Width(p.Allocation[i].Percent)"></span>
+            }
+        </div>
+        <ul class="legend">
+            @for (var i = 0; i < p.Allocation.Count; i++)
+            {
+                var a = p.Allocation[i];
+                <li>
+                    <span class="swatch s@(i % 7)" aria-hidden="true"></span>
+                    <span>@Fmt.AssetClass(a.AssetClass)</span>
+                    <span class="num">@Fmt.Percent(a.Percent)</span>
+                    <span class="num muted">@Fmt.Money(a.ValueBase)</span>
+                </li>
+            }
+        </ul>
+    </section>
+
+    <section>
+        <div class="day-head"><h2>Holdings</h2></div>
+        <div class="card rows">
+            @foreach (var h in p.Holdings)
+            {
+                <button type="button" class="row" @onclick="() => Edit(h)">
+                    <span class="row-main">
+                        @if (IsPriced(h.AssetClass))
+                        {
+                            <span class="tx-name">@h.Symbol <span class="muted">@h.Name</span></span>
+                        }
+                        else
+                        {
+                            <span class="tx-name">@h.Name</span>
+                        }
+                        <span class="muted">
+                            @Fmt.AssetClass(h.AssetClass)@(string.IsNullOrWhiteSpace(h.Platform) ? "" : $" · {h.Platform}")
+                            @if (h.PriceIsStale && IsPriced(h.AssetClass))
+                            {
+                                <span class="tag warn">Price out of date</span>
+                            }
+                        </span>
+                    </span>
+                    <span class="row-end">
+                        <span class="num">@Fmt.Money(h.MarketValueBase)</span>
+                        @if (IsPriced(h.AssetClass) && h.UnrealisedPnlPct is { } gain)
+                        {
+                            <span class="num small @(gain < 0 ? "neg" : "pos")">@(gain > 0 ? "+" : "")@Fmt.Percent(gain)</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+    </section>
+}
+
+@if (editing)
+{
+    <Sheet Title="@(editId is null ? "Add holding" : "Edit holding")" OnClose="() => editing = false">
+        <form @onsubmit="Save" @onsubmit:preventDefault>
+            <label for="h-class">Type</label>
+            <select id="h-class" @bind="assetClass">
+                @foreach (var c in Classes)
+                {
+                    <option value="@c">@Fmt.AssetClass(c)</option>
+                }
+            </select>
+
+            @if (IsBalance)
+            {
+                <label for="h-name">Name</label>
+                <input id="h-name" type="text" placeholder="@(assetClass == "Cpf" ? "CPF Ordinary Account" : "Emergency fund")" @bind="name" />
+
+                <label for="h-balance">Balance (S$)</label>
+                <input id="h-balance" type="number" inputmode="decimal" step="0.01" min="0" @bind="balance" />
+            }
+            else
+            {
+                <div class="two">
+                    <div>
+                        <label for="h-symbol">Ticker</label>
+                        <input id="h-symbol" type="text" autocapitalize="characters" autocorrect="off" placeholder="ES3.SI" @bind="symbol" />
+                    </div>
+                    <div>
+                        <label for="h-ccy">Currency</label>
+                        <select id="h-ccy" @bind="currency">
+                            @foreach (var c in Currencies)
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <label for="h-name">Name</label>
+                <input id="h-name" type="text" placeholder="STI ETF" @bind="name" />
+
+                <div class="two">
+                    <div>
+                        <label for="h-units">Units held</label>
+                        <input id="h-units" type="number" inputmode="decimal" step="any" min="0" @bind="units" />
+                    </div>
+                    <div>
+                        <label for="h-cost">Average cost per unit</label>
+                        <input id="h-cost" type="number" inputmode="decimal" step="any" min="0" @bind="averageCost" />
+                    </div>
+                </div>
+
+                <div class="two">
+                    <div>
+                        <label for="h-price">Latest price per unit</label>
+                        <input id="h-price" type="number" inputmode="decimal" step="any" min="0" @bind="lastPrice" />
+                    </div>
+                    @if (currency != "SGD")
+                    {
+                        <div>
+                            <label for="h-fx">1 @currency in S$</label>
+                            <input id="h-fx" type="number" inputmode="decimal" step="any" min="0" @bind="fx" />
+                        </div>
+                    }
+                </div>
+            }
+
+            <label for="h-platform">Where it is held (optional)</label>
+            <input id="h-platform" type="text" placeholder="@(IsBalance ? "DBS, CPF Board" : "IBKR, Tiger, Endowus")" @bind="platform" />
+
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+            @if (editId is not null)
+            {
+                <button type="button" class="btn danger block" disabled="@busy" @onclick="Delete">
+                    @(confirmDelete ? "Tap again to remove for good" : "Remove this holding")
+                </button>
+            }
+        </form>
+    </Sheet>
+}
+
+@code {
+    private static readonly string[] Classes = ["Etf", "Stock", "Bond", "Crypto", "Cash", "Cpf", "Other"];
+    private static readonly string[] Currencies = ["SGD", "USD", "HKD", "GBP", "EUR", "AUD", "JPY", "MYR"];
+
+    private PortfolioSummary? p;
+    private string? error;
+
+    private bool editing;
+    private int? editId;
+    private string assetClass = "Etf";
+    private string symbol = "";
+    private string name = "";
+    private string? platform;
+    private string currency = "SGD";
+    private decimal? units;
+    private decimal? averageCost;
+    private decimal? lastPrice;
+    private decimal? fx;
+    private decimal? balance;
+    private string? formError;
+    private bool busy;
+    private bool confirmDelete;
+
+    /// <summary>CPF and cash are a single balance, not units × price.</summary>
+    private bool IsBalance => assetClass is "Cpf" or "Cash";
+    private static bool IsPriced(string assetClass) => assetClass is not ("Cpf" or "Cash");
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            p = await Api.Portfolio();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private static string Width(decimal percent) =>
+        Math.Clamp(percent, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private void Edit(HoldingValue? h)
+    {
+        editing = true;
+        formError = null;
+        confirmDelete = false;
+        editId = h?.Id;
+        assetClass = h?.AssetClass ?? "Etf";
+        symbol = h?.Symbol ?? "";
+        name = h?.Name ?? "";
+        platform = h?.Platform;
+        currency = h?.Currency ?? "SGD";
+        units = Fmt.Trim(h?.Units);
+        averageCost = Fmt.Trim(h?.AverageCost);
+        lastPrice = Fmt.Trim(h?.LastPrice);
+        fx = h is null || h.FxToBase == 1 ? null : Fmt.Trim(h.FxToBase);
+        // A balance is stored as 1 unit whose "price" is the balance.
+        balance = h is null ? null : Fmt.Trim(h.Units * (h.LastPrice ?? h.AverageCost));
+    }
+
+    private async Task Save()
+    {
+        if (busy) return;
+        formError = Validate();
+        if (formError is not null) return;
+
+        HoldingSave body;
+        if (IsBalance)
+        {
+            body = new HoldingSave(assetClass == "Cpf" ? "CPF" : "CASH", name.Trim(), assetClass, Clean(platform),
+                1, balance!.Value, "SGD", balance.Value, 1);
+        }
+        else
+        {
+            body = new HoldingSave(symbol.Trim(), string.IsNullOrWhiteSpace(name) ? symbol.Trim() : name.Trim(),
+                assetClass, Clean(platform), units!.Value, averageCost!.Value, currency,
+                lastPrice, currency == "SGD" ? 1 : fx!.Value);
+        }
+
+        busy = true;
+        try
+        {
+            await Api.SaveHolding(editId, body);
+            Toast.Show("Saved.");
+            editing = false;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            formError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private string? Validate()
+    {
+        if (IsBalance)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Give it a name, such as CPF Ordinary Account.";
+            if (balance is not >= 0) return "Enter the balance.";
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(symbol)) return "Enter the ticker, such as ES3.SI.";
+        if (units is not >= 0) return "Enter how many units you hold.";
+        if (averageCost is not >= 0) return "Enter the average cost per unit.";
+        if (lastPrice is < 0) return "The latest price can't be negative.";
+        if (currency != "SGD" && fx is not > 0) return $"Enter what 1 {currency} is worth in S$.";
+        return null;
+    }
+
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task Delete()
+    {
+        if (editId is null || busy) return;
+        if (!confirmDelete)
+        {
+            confirmDelete = true;
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await Api.DeleteHolding(editId.Value);
+            Toast.Show("Holding removed.");
+            editing = false;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            formError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

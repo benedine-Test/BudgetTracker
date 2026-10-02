@@ -1,0 +1,72 @@
+@inject Api Api
+@inject Toast Toast
+
+<Sheet Title="Record income" OnClose="OnClose">
+    <form @onsubmit="Save" @onsubmit:preventDefault>
+        <label for="inc-kind">Type</label>
+        <select id="inc-kind" @bind="kind">
+            <option value="salary">Salary (sets the budget)</option>
+            <option value="other">Other income</option>
+            <option value="refund">Refund</option>
+        </select>
+
+        <label for="inc-amount">@(kind == "salary" ? "Take-home pay, after CPF (S$)" : "Amount (S$)")</label>
+        <input id="inc-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
+
+        <label for="inc-date">Date received</label>
+        <input id="inc-date" type="date" @bind="date" @bind:format="yyyy-MM-dd" />
+
+        <label for="inc-note">Note (optional)</label>
+        <input id="inc-note" type="text" @bind="note" />
+
+        @if (kind == "salary")
+        {
+            <p class="hint">The budget for that pay period is split using your current percentages. A second salary entry in the same period is added on top. Entered one by mistake? Delete it under Spending → Income and the budget is corrected.</p>
+        }
+        @if (error is not null)
+        {
+            <p class="field-error" role="alert">@error</p>
+        }
+        <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+    </form>
+</Sheet>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private string kind = "salary";
+    private decimal? amount;
+    private DateTime date = Fmt.Today.ToDateTime(TimeOnly.MinValue);
+    private string? note;
+    private string? error;
+    private bool busy;
+
+    private async Task Save()
+    {
+        if (busy) return;
+        if (amount is not > 0)
+        {
+            error = "Enter an amount above zero.";
+            return;
+        }
+
+        busy = true;
+        error = null;
+        try
+        {
+            // Midday keeps the entry on the chosen date whatever the time zone handling.
+            await Api.RecordIncome(amount.Value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", string.IsNullOrWhiteSpace(note) ? null : note.Trim());
+            Toast.Show(kind == "salary" ? "Salary recorded. Budget updated." : "Income recorded.");
+            await OnSaved.InvokeAsync();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

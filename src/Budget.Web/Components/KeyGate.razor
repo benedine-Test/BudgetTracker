@@ -1,0 +1,50 @@
+@inject Api Api
+@inject KeyStore Keys
+
+<div class="gate">
+    <div class="gate-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <h1>Budget</h1>
+    <p>Paste the secret key you saved in Azure. You only do this once on this phone.</p>
+
+    <form @onsubmit="Save" @onsubmit:preventDefault>
+        <label for="key">Secret key</label>
+        <input id="key" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               @bind="key" @bind:event="oninput" />
+        @if (error is not null)
+        {
+            <p class="field-error" role="alert">@error</p>
+        }
+        <button type="submit" class="btn primary block" disabled="@(busy || string.IsNullOrWhiteSpace(key))">
+            @(busy ? "Checking…" : "Continue")
+        </button>
+    </form>
+</div>
+
+@code {
+    private string key = "";
+    private string? error;
+    private bool busy;
+
+    private async Task Save()
+    {
+        if (busy || string.IsNullOrWhiteSpace(key)) return;
+        busy = true;
+        error = null;
+        try
+        {
+            var candidate = key.Trim();
+            if (await Api.KeyWorks(candidate))
+                await Keys.SetAsync(candidate);
+            else
+                error = "That key doesn't match the one in Azure. Check for a missing character or a space at the end.";
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

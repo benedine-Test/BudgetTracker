@@ -1,0 +1,9 @@
+<div class="card error-box" role="alert">
+    <p>@Message</p>
+    <button type="button" class="btn" @onclick="OnRetry">Try again</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Message { get; set; } = "";
+    [Parameter] public EventCallback OnRetry { get; set; }
+}

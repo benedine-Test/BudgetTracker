@@ -1,0 +1,14 @@
+<div class="loading" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    <p>@(slow ? "Waking the server. On the free plan this can take about 20 seconds." : "Loading…")</p>
+</div>
+
+@code {
+    private bool slow;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Delay(3000);
+        slow = true;
+    }
+}

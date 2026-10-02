@@ -1,0 +1,363 @@
+@page "/transactions"
+@inject Api Api
+@inject Toast Toast
+@inject NavigationManager Nav
+
+<PageTitle>Spending</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Spending</h1>
+        @if (HasRange)
+        {
+            <p class="sub">
+                @RangeLabel
+                <button type="button" class="link" @onclick="ClearRange">Show all dates</button>
+            </p>
+        }
+    </div>
+    <button type="button" class="btn primary small" @onclick="OpenAdd">Add</button>
+</header>
+
+<div class="search">
+    <label class="sr-only" for="tx-search">Search</label>
+    <input id="tx-search" type="search" placeholder="Search shop or note" value="@search" @oninput="SearchChanged" />
+</div>
+
+<div class="chips scroll" role="group" aria-label="Filter">
+    @foreach (var (value, label) in Filters)
+    {
+        <button type="button" class="chip @(Current == value ? "on" : "")" aria-pressed="@(Current == value ? "true" : "false")"
+                @onclick="() => SetFilter(value)">@label</button>
+    }
+</div>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (items is null)
+{
+    <Loading />
+}
+else if (items.Count == 0)
+{
+    <div class="card empty">
+        <p>@EmptyText</p>
+    </div>
+}
+else
+{
+    @foreach (var day in items.GroupBy(t => DateOnly.FromDateTime(t.OccurredAt.DateTime)))
+    {
+        var spent = day.Where(t => !t.IsIncome && t.Bucket != "Transfer").Sum(t => t.Amount);
+        <section class="day">
+            <div class="day-head">
+                <h2>@Fmt.Day(day.Key)</h2>
+                @if (spent > 0)
+                {
+                    <span class="num muted">@Fmt.Money(spent)</span>
+                }
+            </div>
+            <div class="card rows">
+                @foreach (var t in day)
+                {
+                    <button type="button" class="row tx" @onclick="() => Open(t)">
+                        <span class="dot @Fmt.BucketClass(t.Bucket)" aria-hidden="true"></span>
+                        <span class="row-main">
+                            <span class="tx-name">@t.Merchant</span>
+                            @if (t.Category is null)
+                            {
+                                <span class="tag warn">Needs a category</span>
+                            }
+                            else
+                            {
+                                <span class="muted">@t.Category</span>
+                            }
+                        </span>
+                        <span class="num @(t.IsIncome ? "pos" : "")">@(t.IsIncome ? "+" : "")@Fmt.Money(t.Amount, t.Currency)</span>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+    @if (items.Count >= 300)
+    {
+        <p class="hint center">Showing the latest 300. Search or filter to find older ones.</p>
+    }
+}
+
+@if (selected is not null)
+{
+    <Sheet Title="@selected.Merchant" OnClose="CloseSheets">
+        <p class="sheet-amount">@(selected.IsIncome ? "+" : "")@Fmt.Money(selected.Amount, selected.Currency)</p>
+        <p class="muted">
+            @Fmt.When(selected.OccurredAt) · @Fmt.Source(selected.Source)@(string.IsNullOrWhiteSpace(selected.Card) ? "" : $" · {selected.Card}")
+        </p>
+        @if (!string.IsNullOrWhiteSpace(selected.Notes))
+        {
+            <p class="muted">@selected.Notes</p>
+        }
+
+        @if (!selected.IsIncome)
+        {
+            <label class="check">
+                <input type="checkbox" @bind="learn" />
+                <span>Use the same category for this shop from now on</span>
+            </label>
+
+            @foreach (var group in CategoryGroups)
+            {
+                <h3 class="group-title @Fmt.BucketClass(group.Key)">@group.Key</h3>
+                <div class="chips wrap">
+                    @foreach (var c in group)
+                    {
+                        <button type="button" class="chip @(c.Id == selected.CategoryId ? "on" : "")" disabled="@busy"
+                                @onclick="() => Categorise(c)">@c.Name</button>
+                    }
+                </div>
+            }
+        }
+
+        <button type="button" class="btn danger block" disabled="@busy" @onclick="Delete">
+            @(confirmDelete ? "Tap again to delete for good" : "Delete this entry")
+        </button>
+    </Sheet>
+}
+
+@if (adding)
+{
+    <Sheet Title="Add spending" OnClose="CloseSheets">
+        <form @onsubmit="SaveNew" @onsubmit:preventDefault>
+            <label for="add-amount">Amount (S$)</label>
+            <input id="add-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="newAmount" />
+
+            <label for="add-merchant">Shop or payee</label>
+            <input id="add-merchant" type="text" autocapitalize="words" @bind="newMerchant" />
+
+            <label for="add-cat">Category</label>
+            <select id="add-cat" @bind="newCategoryId">
+                <option value="0">Work it out from the shop name</option>
+                @foreach (var group in CategoryGroups)
+                {
+                    <optgroup label="@group.Key">
+                        @foreach (var c in group)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </optgroup>
+                }
+            </select>
+
+            <label for="add-when">When</label>
+            <input id="add-when" type="datetime-local" @bind="newWhen" @bind:format="yyyy-MM-ddTHH:mm" />
+
+            <label for="add-notes">Note (optional)</label>
+            <input id="add-notes" type="text" @bind="newNotes" />
+
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+        </form>
+    </Sheet>
+}
+
+@code {
+    private static readonly (string Value, string Label)[] Filters =
+    [
+        ("all", "All"), ("sort", "To sort"), ("needs", "Needs"), ("wants", "Wants"),
+        ("savings", "Savings"), ("income", "Income")
+    ];
+
+    [SupplyParameterFromQuery] public string? Filter { get; set; }
+    [SupplyParameterFromQuery] public string? From { get; set; }
+    [SupplyParameterFromQuery] public string? To { get; set; }
+
+    private List<TransactionDto>? items;
+    private List<CategoryDto> categories = [];
+    private string? error;
+    private string search = "";
+    private CancellationTokenSource? searchDelay;
+
+    private TransactionDto? selected;
+    private bool learn = true;
+    private bool confirmDelete;
+    private bool busy;
+
+    private bool adding;
+    private decimal? newAmount;
+    private string newMerchant = "";
+    private int newCategoryId;
+    private DateTime newWhen;
+    private string? newNotes;
+    private string? formError;
+
+    private string Current => Filters.Any(f => f.Value == Filter) ? Filter! : "all";
+    private bool HasRange => DateOnly.TryParse(From, out _) && DateOnly.TryParse(To, out _);
+    private string RangeLabel => Fmt.Range(DateOnly.Parse(From!), DateOnly.Parse(To!).AddDays(1));
+
+    private IEnumerable<IGrouping<string, CategoryDto>> CategoryGroups => categories
+        .Where(c => !c.IsArchived && c.Bucket is "Needs" or "Wants" or "Savings" or "Transfer")
+        .GroupBy(c => c.Bucket);
+
+    private string EmptyText => Current switch
+    {
+        "sort" => "Nothing to sort. Every purchase has a category.",
+        _ when !string.IsNullOrWhiteSpace(search) => $"Nothing matches \"{search}\".",
+        "all" => "Nothing here yet. Apple Pay taps appear on their own, or use Add.",
+        _ => "Nothing in this group for these dates."
+    };
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            if (categories.Count == 0) categories = await Api.Categories();
+            items = await Api.Transactions(Current, HasRange ? From : null, HasRange ? To : null, search);
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private void SetFilter(string value)
+    {
+        items = null;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("filter", value == "all" ? null : value), replace: true);
+    }
+
+    private void ClearRange()
+    {
+        items = null;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["from"] = null, ["to"] = null }), replace: true);
+    }
+
+    private async Task SearchChanged(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? "";
+        searchDelay?.Cancel();
+        var mine = searchDelay = new CancellationTokenSource();
+        try { await Task.Delay(350, mine.Token); }
+        catch (TaskCanceledException) { return; }
+        await Load();
+    }
+
+    private void Open(TransactionDto t)
+    {
+        selected = t;
+        learn = true;
+        confirmDelete = false;
+    }
+
+    private void OpenAdd()
+    {
+        adding = true;
+        newAmount = null;
+        newMerchant = "";
+        newCategoryId = 0;
+        newNotes = null;
+        formError = null;
+        var now = DateTime.Now;
+        newWhen = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0);
+    }
+
+    private void CloseSheets()
+    {
+        selected = null;
+        adding = false;
+    }
+
+    private async Task Categorise(CategoryDto c)
+    {
+        if (selected is null || busy) return;
+        busy = true;
+        try
+        {
+            var result = await Api.Categorise(selected.Id, c.Id, learn);
+            Toast.Show(result.ReFiled > 0
+                ? $"Filed under {c.Name}. {result.ReFiled} similar {(result.ReFiled == 1 ? "entry" : "entries")} moved too."
+                : $"Filed under {c.Name}.");
+            selected = null;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        if (selected is null || busy) return;
+        if (!confirmDelete)
+        {
+            confirmDelete = true;
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await Api.DeleteTransaction(selected.Id);
+            Toast.Show("Entry deleted.");
+            selected = null;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveNew()
+    {
+        if (busy) return;
+        if (newAmount is not > 0)
+        {
+            formError = "Enter an amount above zero.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(newMerchant))
+        {
+            formError = "Enter the shop or payee.";
+            return;
+        }
+
+        busy = true;
+        formError = null;
+        try
+        {
+            // Send the phone's own offset so the time is right even when travelling.
+            var when = new DateTimeOffset(DateTime.SpecifyKind(newWhen, DateTimeKind.Unspecified),
+                TimeZoneInfo.Local.GetUtcOffset(newWhen));
+            await Api.AddSpend(newAmount.Value, newMerchant.Trim(), newCategoryId == 0 ? null : newCategoryId,
+                when.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(newNotes) ? null : newNotes.Trim());
+            Toast.Show("Added.");
+            adding = false;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            formError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

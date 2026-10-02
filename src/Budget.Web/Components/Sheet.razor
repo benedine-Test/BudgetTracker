@@ -1,0 +1,18 @@
+<div class="sheet-backdrop" @onclick="OnClose"></div>
+<div class="sheet" role="dialog" aria-modal="true" aria-label="@Title">
+    <header class="sheet-head">
+        <h2>@Title</h2>
+        <button type="button" class="icon-btn" aria-label="Close" @onclick="OnClose">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+        </button>
+    </header>
+    <div class="sheet-body">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

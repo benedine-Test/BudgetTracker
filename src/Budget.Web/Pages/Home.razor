@@ -1,0 +1,210 @@
+@page "/"
+@inject Api Api
+
+<PageTitle>Budget</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Budget</h1>
+        @if (s is not null)
+        {
+            <p class="sub">
+                @Fmt.Range(s.PeriodStart, s.PeriodEndExclusive)
+                @if (IsCurrent)
+                {
+                    <span> · @s.DaysLeft @(s.DaysLeft == 1 ? "day" : "days") left</span>
+                }
+            </p>
+        }
+    </div>
+    <div class="pager">
+        <button type="button" class="icon-btn" aria-label="Previous pay period" disabled="@(s is null)" @onclick="Prev">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.4 8.4 12l6.6 6.6-1.4 1.4-8-8 8-8z" /></svg>
+        </button>
+        <button type="button" class="icon-btn" aria-label="Next pay period" disabled="@(s is null || IsCurrent || IsFuture)" @onclick="Next">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5.4 6.6 6.6L9 18.6l1.4 1.4 8-8-8-8z" /></svg>
+        </button>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (s is null)
+{
+    <Loading />
+}
+else
+{
+    @if (!s.SalaryRecorded)
+    {
+        <section class="card notice">
+            <h2>No salary recorded for this period</h2>
+            <p>Record your take-home pay and it is split into needs, wants and savings for you.</p>
+            <button type="button" class="btn primary" @onclick="() => showIncome = true">Record salary</button>
+        </section>
+    }
+    else
+    {
+        <section class="card hero">
+            <p class="label">@(s.LeftToSpend < 0 ? "Over your take-home pay by" : "Left from this pay")</p>
+            <p class="big @(s.LeftToSpend < 0 ? "neg" : "")">@Fmt.Money(Math.Abs(s.LeftToSpend))</p>
+            <p class="sub">@Fmt.Money(s.TotalSpent) used of @Fmt.Money(s.TakeHomeIncome)</p>
+        </section>
+    }
+
+    @if (s.UncategorisedCount > 0)
+    {
+        <a class="card banner" href="@TxLink("sort")">
+            <span>
+                <strong>@s.UncategorisedCount @(s.UncategorisedCount == 1 ? "purchase needs" : "purchases need") a category</strong>
+                <span class="muted">@Fmt.Money(s.UncategorisedSpend) not counted in any bucket yet</span>
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5.4 6.6 6.6L9 18.6l1.4 1.4 8-8-8-8z" /></svg>
+        </a>
+    }
+
+    <section class="buckets" aria-label="Buckets">
+        @foreach (var b in s.Buckets)
+        {
+            var cls = Fmt.BucketClass(b.Bucket);
+            <a class="card bucket @cls" href="@TxLink(cls)">
+                <div class="bucket-head">
+                    <h2>@b.Bucket</h2>
+                    <span class="num">@Fmt.Money(b.Spent)@(b.Budget > 0 ? $" of {Fmt.Money(b.Budget)}" : "")</span>
+                </div>
+                @if (b.Budget > 0)
+                {
+                    <div class="bar" role="img" aria-label="@($"{Fmt.Percent(b.PercentUsed)} used")">
+                        <span class="@(b.Status == "over" ? "over" : "")" style="width:@Width(b.PercentUsed)"></span>
+                    </div>
+                }
+                <p class="bucket-foot @(b.Status == "over" ? "neg" : "")">@Foot(b)</p>
+            </a>
+        }
+    </section>
+
+    @if (s.TopCategories.Count > 0)
+    {
+        var max = s.TopCategories.Max(c => c.Total);
+        <section class="card">
+            <h2>Where it went</h2>
+            @foreach (var c in s.TopCategories)
+            {
+                <div class="cat-row">
+                    <div class="cat-head">
+                        <span>@c.Category <span class="muted">· @c.Count</span></span>
+                        <span class="num">@Fmt.Money(c.Total)</span>
+                    </div>
+                    <div class="bar thin @Fmt.BucketClass(c.Bucket)" aria-hidden="true">
+                        <span style="width:@Width(max == 0 ? 0 : c.Total / max * 100)"></span>
+                    </div>
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="card empty">
+            <p>No spending in this period yet. Apple Pay taps appear here on their own.</p>
+        </section>
+    }
+
+    @if (Past.Count > 0)
+    {
+        <section class="card">
+            <h2>Other pay periods</h2>
+            <div class="rows">
+                @foreach (var p in Past)
+                {
+                    <button type="button" class="row" @onclick="() => Go(p.PeriodStart)">
+                        <span class="row-main">
+                            <span>@Fmt.Range(p.PeriodStart, p.PeriodEndExclusive)</span>
+                            <span class="muted">@PastLine(p)</span>
+                        </span>
+                        <span class="num">@Fmt.Money(p.TotalSpent)</span>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+}
+
+@if (showIncome)
+{
+    <IncomeSheet OnClose="() => showIncome = false" OnSaved="IncomeSaved" />
+}
+
+@code {
+    private BudgetSummary? s;
+    private List<BudgetSummary> history = [];
+    private DateOnly? date;
+    private string? error;
+    private bool showIncome;
+
+    private bool IsCurrent => s is not null && s.PeriodStart <= Fmt.Today && Fmt.Today < s.PeriodEndExclusive;
+    private bool IsFuture => s is not null && s.PeriodStart > Fmt.Today;
+    private List<BudgetSummary> Past => history.Where(h => s is null || h.PeriodStart != s.PeriodStart).ToList();
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            s = await Api.Summary(date);
+            history = await Api.History();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private Task Go(DateOnly day)
+    {
+        date = day;
+        s = null;
+        return Load();
+    }
+
+    private Task Prev() => s is null ? Task.CompletedTask : Go(s.PeriodStart.AddDays(-1));
+    private Task Next() => s is null ? Task.CompletedTask : Go(s.PeriodEndExclusive);
+
+    private async Task IncomeSaved()
+    {
+        showIncome = false;
+        await Load();
+    }
+
+    private string TxLink(string filter) =>
+        $"transactions?filter={filter}&from={Fmt.Iso(s!.PeriodStart)}&to={Fmt.Iso(s.PeriodEndExclusive.AddDays(-1))}";
+
+    private static string Width(decimal percent) =>
+        Math.Clamp(percent, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private string Foot(BucketStatus b)
+    {
+        if (b.Budget <= 0)
+            return b.Spent > 0 ? "No budget set for this period" : "Nothing yet";
+
+        if (b.Bucket == "Savings")
+            return b.Remaining <= 0
+                ? (b.Remaining < 0 ? $"Target met, {Fmt.Money(-b.Remaining)} extra" : "Target met")
+                : $"{Fmt.Money(b.Remaining)} to go";
+
+        if (b.Remaining < 0) return $"Over by {Fmt.Money(-b.Remaining)}";
+        return IsCurrent && b.DailyAllowance > 0
+            ? $"{Fmt.Money(b.Remaining)} left · about {Fmt.Money(b.DailyAllowance)} a day"
+            : $"{Fmt.Money(b.Remaining)} left";
+    }
+
+    private static string PastLine(BudgetSummary p)
+    {
+        if (!p.SalaryRecorded) return "No salary recorded";
+        return string.Join(" · ", p.Buckets.Select(b =>
+            $"{(b.Bucket == "Savings" ? "Saved" : b.Bucket)} {Fmt.Percent(Math.Round(b.PercentUsed))}"));
+    }
+}

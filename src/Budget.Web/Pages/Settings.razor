@@ -1,0 +1,230 @@
+@page "/settings"
+@inject Api Api
+@inject Toast Toast
+@inject KeyStore Keys
+@inject IJSRuntime JS
+
+<PageTitle>Settings</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Settings</h1>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (!loaded)
+{
+    <Loading />
+}
+else
+{
+    <section class="card">
+        <h2>Income</h2>
+        <p class="muted">Record your salary each payday. That is what sets the budget for the period.</p>
+        <button type="button" class="btn primary" @onclick="() => showIncome = true">Record salary or income</button>
+    </section>
+
+    <section class="card">
+        <h2>Budget split</h2>
+        <form @onsubmit="SaveSplit" @onsubmit:preventDefault>
+            <div class="three">
+                <div>
+                    <label for="s-needs">Needs %</label>
+                    <input id="s-needs" type="number" inputmode="decimal" min="0" max="100" step="1" @bind="needs" @bind:event="oninput" />
+                </div>
+                <div>
+                    <label for="s-wants">Wants %</label>
+                    <input id="s-wants" type="number" inputmode="decimal" min="0" max="100" step="1" @bind="wants" @bind:event="oninput" />
+                </div>
+                <div>
+                    <label for="s-savings">Savings %</label>
+                    <input id="s-savings" type="number" inputmode="decimal" min="0" max="100" step="1" @bind="savings" @bind:event="oninput" />
+                </div>
+            </div>
+            <p class="hint @(Total == 100 ? "" : "neg")">
+                Total @Fmt.Percent(Total)@(Total == 100 ? "" : " — must add up to 100%")
+            </p>
+
+            <label for="s-payday">Payday (day of the month)</label>
+            <input id="s-payday" type="number" inputmode="numeric" min="1" max="31" step="1" @bind="payDay" />
+            <p class="hint">A budget runs from one payday to the next. Changes apply from your next salary; past periods keep the split they had.</p>
+
+            <button type="submit" class="btn primary" disabled="@(busy || Total != 100)">@(busy ? "Saving…" : "Save")</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Categories</h2>
+        <p class="muted">Pick which bucket each category counts towards. Moving one changes every period that uses it.</p>
+        <div class="rows">
+            @foreach (var c in categories.Where(c => !c.IsArchived))
+            {
+                <div class="row static">
+                    <label for="@($"cat-{c.Id}")" class="row-main"><span>@c.Name</span></label>
+                    <select id="@($"cat-{c.Id}")" class="compact" value="@c.Bucket" @onchange="e => Move(c, e.Value?.ToString())">
+                        @foreach (var b in Buckets)
+                        {
+                            <option value="@b">@b</option>
+                        }
+                    </select>
+                </div>
+            }
+        </div>
+        <form class="add-cat" @onsubmit="AddCategory" @onsubmit:preventDefault>
+            <label for="new-cat">New category</label>
+            <div class="inline">
+                <input id="new-cat" type="text" autocapitalize="words" @bind="newName" />
+                <select aria-label="Bucket for the new category" class="compact" @bind="newBucket">
+                    @foreach (var b in Buckets)
+                    {
+                        <option value="@b">@b</option>
+                    }
+                </select>
+                <button type="submit" class="btn" disabled="@busy">Add</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Your data</h2>
+        <button type="button" class="btn" disabled="@busy" @onclick="Export">Export as spreadsheet (CSV)</button>
+        <button type="button" class="btn danger" @onclick="Forget">
+            @(confirmForget ? "Tap again to forget the key" : "Forget the key on this phone")
+        </button>
+        <p class="hint">Forgetting the key signs this phone out. Nothing on the server is deleted.</p>
+    </section>
+}
+
+@if (showIncome)
+{
+    <IncomeSheet OnClose="() => showIncome = false" OnSaved="() => showIncome = false" />
+}
+
+@code {
+    private static readonly string[] Buckets = ["Needs", "Wants", "Savings", "Income", "Transfer"];
+
+    private bool loaded;
+    private string? error;
+    private bool busy;
+    private bool showIncome;
+    private bool confirmForget;
+
+    private decimal needs;
+    private decimal wants;
+    private decimal savings;
+    private int payDay;
+    private decimal Total => needs + wants + savings;
+
+    private List<CategoryDto> categories = [];
+    private string newName = "";
+    private string newBucket = "Wants";
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            var s = await Api.Settings();
+            (needs, wants, savings, payDay) = (Fmt.Trim(s.NeedsPct), Fmt.Trim(s.WantsPct), Fmt.Trim(s.SavingsPct), s.PayDay);
+            categories = await Api.Categories();
+            loaded = true;
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private async Task SaveSplit()
+    {
+        if (busy) return;
+        if (payDay is < 1 or > 31)
+        {
+            Toast.Error("Payday must be between 1 and 31.");
+            return;
+        }
+
+        await Run(async () =>
+        {
+            await Api.SaveSettings(new SettingsDto(payDay, needs, wants, savings));
+            Toast.Show("Saved. Applies from your next salary.");
+        });
+    }
+
+    private async Task Move(CategoryDto c, string? bucket)
+    {
+        if (bucket is null || bucket == c.Bucket) return;
+        await Run(async () =>
+        {
+            await Api.MoveCategory(c, bucket);
+            Toast.Show($"{c.Name} now counts as {bucket}.");
+        });
+        categories = await SafeCategories();
+    }
+
+    private async Task AddCategory()
+    {
+        if (busy) return;
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            Toast.Error("Enter a name for the category.");
+            return;
+        }
+
+        await Run(async () =>
+        {
+            await Api.AddCategory(newName.Trim(), newBucket);
+            Toast.Show($"{newName.Trim()} added.");
+            newName = "";
+        });
+        categories = await SafeCategories();
+    }
+
+    private async Task Export()
+    {
+        await Run(async () =>
+        {
+            var bytes = await Api.ExportCsv();
+            await JS.InvokeVoidAsync("budget.saveFile", $"budget-{Fmt.Iso(Fmt.Today)}.csv", "text/csv", Convert.ToBase64String(bytes));
+        });
+    }
+
+    private async Task Forget()
+    {
+        if (!confirmForget)
+        {
+            confirmForget = true;
+            return;
+        }
+        await Keys.ClearAsync();
+    }
+
+    private async Task<List<CategoryDto>> SafeCategories()
+    {
+        try { return await Api.Categories(); }
+        catch (ApiException) { return categories; }
+    }
+
+    private async Task Run(Func<Task> work)
+    {
+        busy = true;
+        try
+        {
+            await work();
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

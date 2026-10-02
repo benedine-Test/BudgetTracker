@@ -1,0 +1,60 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject KeyStore Keys
+@inject Toast Toast
+
+@if (!Keys.Loaded)
+{
+    <div class="boot" role="status">Loading…</div>
+}
+else if (string.IsNullOrEmpty(Keys.Key))
+{
+    <KeyGate />
+}
+else
+{
+    <main class="page">
+        @Body
+    </main>
+
+    <nav class="tabbar" aria-label="Sections">
+        <NavLink href="" Match="NavLinkMatch.All">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h4v7H4zM10 4h4v16h-4zM16 9h4v11h-4z" /></svg>
+            <span>Budget</span>
+        </NavLink>
+        <NavLink href="transactions">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4zM4 11h16v2H4zM4 16h10v2H4z" /></svg>
+            <span>Spending</span>
+        </NavLink>
+        <NavLink href="invest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.6 9 11l4 4 7.3-8.2 1.5 1.3L13.1 18l-4-4-4.6 5z" /></svg>
+            <span>Invest</span>
+        </NavLink>
+        <NavLink href="settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9v2H4zM17 5h3v6h-3zM4 15h3v2H4zM9 13h3v6H9zM14 15h6v2h-6z" /></svg>
+            <span>Settings</span>
+        </NavLink>
+    </nav>
+}
+
+@if (Toast.Message is not null)
+{
+    <div class="toast @(Toast.IsError ? "error" : "")" role="@(Toast.IsError ? "alert" : "status")">@Toast.Message</div>
+}
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Keys.Changed += Refresh;
+        Toast.Changed += Refresh;
+        await Keys.LoadAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Keys.Changed -= Refresh;
+        Toast.Changed -= Refresh;
+    }
+}
