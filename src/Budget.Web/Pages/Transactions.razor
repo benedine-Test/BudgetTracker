@@ -75,7 +75,14 @@ else
                                 <span class="muted">@t.Category</span>
                             }
                         </span>
-                        <span class="num @(t.IsIncome ? "pos" : "")">@(t.IsIncome ? "+" : "")@Fmt.Money(t.Amount, t.Currency)</span>
+                        @if (IsFarePending(t))
+                        {
+                            <span class="tag muted">Fare pending</span>
+                        }
+                        else
+                        {
+                            <span class="num @(t.IsIncome ? "pos" : "")">@(t.IsIncome ? "+" : "")@Fmt.Money(t.Amount, t.Currency)</span>
+                        }
                     </button>
                 }
             </div>
@@ -247,6 +254,9 @@ else
         catch (TaskCanceledException) { return; }
         await Load();
     }
+
+    // A bus/MRT tap saved before its fare is charged.
+    private static bool IsFarePending(TransactionDto t) => !t.IsIncome && t.Amount == 0;
 
     private void Open(TransactionDto t)
     {

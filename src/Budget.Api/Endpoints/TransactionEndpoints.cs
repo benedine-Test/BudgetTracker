@@ -46,7 +46,7 @@ public static class TransactionEndpoints
             Ingest(body, TransactionSource.EmailAlert, svc, clock, budgets, ct));
 
         api.MapPost("/transactions", async (SpendCreate body, BudgetDbContext db, Categorizer cat, Clock clock,
-            BudgetService budgets, CancellationToken ct) =>
+            BudgetService budgets, TransactionService svc, CancellationToken ct) =>
         {
             if (body.Amount <= 0) return Results.BadRequest(new { message = "Amount must be positive." });
             if (string.IsNullOrWhiteSpace(body.Merchant)) return Results.BadRequest(new { message = "Merchant is required." });
@@ -67,6 +67,7 @@ public static class TransactionEndpoints
                 CategoryConfirmed = body.CategoryId is not null
             };
             db.Transactions.Add(tx);
+            await svc.AbsorbPendingFaresAsync(tx, ct);
             await db.SaveChangesAsync(ct);
             await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
             return Results.Created($"/api/transactions/{tx.Id}", ToDto(tx));
@@ -220,11 +221,20 @@ public static class TransactionEndpoints
     private static async Task<IResult> Ingest(ApplePayIngest body, TransactionSource source,
         TransactionService svc, Clock clock, BudgetService budgets, CancellationToken ct)
     {
+        var merchant = FirstNonBlank(body.Merchant, body.Name) ?? "Unknown merchant";
+
+        // Bus/MRT taps report S$0 (or nothing): the fare is worked out after the trip and
+        // charged later. Keep the trip rather than reject it. Bank alerts with S$0 are noise.
+        if (source == TransactionSource.ApplePayShortcut && AmountParser.IsBlankOrZero(body.Amount))
+        {
+            var trip = await svc.LogPendingFareAsync(merchant, body.Card, clock.ParseToUtc(body.Date), source, ct);
+            return Results.Ok(new { message = trip.Message, duplicate = false, transaction = ToDto(trip.Transaction) });
+        }
+
         var settings = await budgets.GetSettingsAsync(ct);
         if (!AmountParser.TryParse(body.Amount, settings.BaseCurrency, out var amount, out var currency))
             return Results.BadRequest(new { message = $"Couldn't read amount '{body.Amount}'." });
 
-        var merchant = FirstNonBlank(body.Merchant, body.Name) ?? "Unknown merchant";
         var result = await svc.IngestSpendAsync(amount, currency, merchant, body.Card,
             clock.ParseToUtc(body.Date), source, null, ct);
 

@@ -69,6 +69,17 @@ public static partial class AmountParser
         return amount > 0;
     }
 
+    /// <summary>
+    /// True for "", "0", "S$0.00"... What a bus/MRT tap reports: the fare isn't known
+    /// until the trip ends and is charged later. "abc" is not zero, it's junk.
+    /// </summary>
+    public static bool IsBlankOrZero(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        var digits = raw.Where(char.IsDigit).ToList();
+        return digits.Count > 0 && digits.All(c => c == '0');
+    }
+
     [GeneratedRegex(@"[^0-9.,\-]")]
     private static partial Regex NumericChars();
 }

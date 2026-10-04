@@ -30,6 +30,16 @@ public class AmountParserTests
     [InlineData("S$0.00")]
     public void Rejects_unusable_input(string? raw) =>
         Assert.False(AmountParser.TryParse(raw, "SGD", out _, out _));
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("0", true)]
+    [InlineData("S$0.00", true)]
+    [InlineData("S$1.20", false)]
+    [InlineData("abc", false)]
+    public void Spots_a_tap_with_no_fare_yet(string? raw, bool expected) =>
+        Assert.Equal(expected, AmountParser.IsBlankOrZero(raw));
 }
 
 public class MerchantTextTests
@@ -50,6 +60,20 @@ public class MerchantTextTests
     [InlineData("Starbucks", "Toast Box", false)]
     public void Merchant_similarity(string a, string b, bool same) =>
         Assert.Equal(same, MerchantText.LooksLikeSameMerchant(a, b));
+}
+
+public class TransitTests
+{
+    [Theory]
+    [InlineData("BUS/MRT 123456789", true)]
+    [InlineData("SimplyGo", true)]
+    [InlineData("SBS Transit", true)]
+    [InlineData("SMRT Trains", true)]
+    [InlineData("Grab", false)]
+    [InlineData("Busy Bee Cafe", false)]
+    [InlineData(null, false)]
+    public void Recognises_public_transport(string? merchant, bool expected) =>
+        Assert.Equal(expected, MerchantText.IsTransit(merchant));
 }
 
 public class PayPeriodTests

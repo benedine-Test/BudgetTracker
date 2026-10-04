@@ -47,6 +47,13 @@ public static partial class MerchantText
         return nb.Split(' ').Any(t => t.Length >= 4 && ta.Contains(t));
     }
 
+    private static readonly HashSet<string> TransitWords =
+        ["BUS", "MRT", "LRT", "SIMPLYGO", "TRANSITLINK", "SMRT", "SBS", "EZ-LINK", "EZLINK"];
+
+    /// <summary>Public transport: "BUS/MRT 123456", "SimplyGo", "SBS Transit"...</summary>
+    public static bool IsTransit(string? merchant) =>
+        Normalize(merchant).Split(' ', '/').Any(TransitWords.Contains);
+
     [GeneratedRegex(@"[^A-Z0-9/.&*#\- ]")]
     private static partial Regex Noise();
 

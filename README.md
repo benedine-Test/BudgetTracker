@@ -73,6 +73,7 @@ You'll get a line like: *S$7.80 at Starbucks → Dining & Food Delivery. Wants l
 Things to check in your first week:
 - The input field names above are from memory of the iOS 17/18 Transaction trigger. If yours differ, pick the closest ones. Amount is parsed leniently ("S$12.50", "12.50", "SGD 12,50" all work).
 - Whether the automation fires for **online / in-app** Apple Pay, not just in-store taps. Anything it misses gets caught by bank emails.
+- **Bus / MRT:** a transit tap has no fare yet (SimplyGo charges it later, usually as one `BUS/MRT` charge per day). A tap with a S$0 or blank amount is saved as *Fare pending* and doesn't count toward the budget. When the real `BUS/MRT` charge arrives (bank alert or added by hand), the pending trips from the 3 days before it are removed, so the charge is the only entry that costs money.
 - **Offline:** if the request fails, nothing is saved. Add an `If` on the result and fall back to **Append to Note** so you can enter it later.
 
 ## API reference
