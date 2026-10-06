@@ -203,4 +203,29 @@ public class PayslipTests
     [InlineData("1972-02-29", "2027-03-01", CpfAgeBand.Over55To60)]
     public void Age_band_from_date_of_birth(string birth, string pay, CpfAgeBand expected) =>
         Assert.Equal(expected, Payslip.AgeBandOn(DateOnly.Parse(birth), DateOnly.Parse(pay)));
+
+    [Theory]
+    [InlineData("1990-06-15", "2026-10-06", "2045-07-01", CpfAgeBand.Over55To60)]
+    [InlineData("1971-03-15", "2026-03-31", "2026-04-01", CpfAgeBand.Over55To60)]   // turns 55 this month
+    [InlineData("1971-03-15", "2026-04-01", "2031-04-01", CpfAgeBand.Over60To65)]   // the day it changed: next one
+    [InlineData("1958-12-20", "2026-10-06", "2029-01-01", CpfAgeBand.Over70)]       // December birthday: January next year
+    public void Next_age_band_change(string birth, string today, string from, CpfAgeBand band)
+    {
+        var next = Payslip.NextBandChange(DateOnly.Parse(birth), DateOnly.Parse(today));
+        Assert.Equal((DateOnly.Parse(from), band), next);
+        // Agrees with the band worked out for a payslip on that day.
+        Assert.Equal(band, Payslip.AgeBandOn(DateOnly.Parse(birth), DateOnly.Parse(from)));
+    }
+
+    [Fact]
+    public void No_band_change_after_70() =>
+        Assert.Null(Payslip.NextBandChange(new DateOnly(1950, 1, 1), new DateOnly(2026, 10, 6)));
+
+    [Theory]
+    [InlineData("1990-10-06", "2026-10-06", 36)]
+    [InlineData("1990-10-07", "2026-10-06", 35)]
+    [InlineData("2000-02-29", "2026-02-27", 25)]
+    [InlineData("2000-02-29", "2026-02-28", 26)]    // leap-day birthday counts from 28 Feb, as in AgeBandOn
+    public void Age_in_completed_years(string birth, string today, int expected) =>
+        Assert.Equal(expected, Payslip.AgeOn(DateOnly.Parse(birth), DateOnly.Parse(today)));
 }

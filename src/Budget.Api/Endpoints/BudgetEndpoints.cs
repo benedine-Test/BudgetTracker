@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Budget.Api.Endpoints;
 
 public record SettingsUpdate(int? PayDay, decimal? NeedsPct, decimal? WantsPct, decimal? SavingsPct);
+/// <summary>BirthDate null clears it.</summary>
+public record ProfileUpdate(DateOnly? BirthDate);
 public record CategoryUpsert(string Name, Bucket Bucket, bool? IsArchived);
 public record RuleCreate(string Pattern, int CategoryId, int? Priority);
 public record HoldingUpsert(string Symbol, string Name, AssetClass AssetClass, string? Platform,
@@ -57,6 +59,20 @@ public static class BudgetEndpoints
             (s.NeedsPct, s.WantsPct, s.SavingsPct) = (needs, wants, savings);
             await db.SaveChangesAsync(ct);
             return Results.Ok(s);
+        });
+
+        // ---- Profile ----
+        api.MapGet("/profile", async (BudgetService svc, CancellationToken ct) =>
+            new { (await svc.GetSettingsAsync(ct)).BirthDate });
+
+        api.MapPut("/profile", async (ProfileUpdate body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
+        {
+            if (body.BirthDate is { } d && (d > clock.Today || d.Year < 1900))
+                return Results.BadRequest(new { message = "That date of birth doesn't look right." });
+            var s = await db.Settings.SingleAsync(x => x.Id == 1, ct);
+            s.BirthDate = body.BirthDate;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { s.BirthDate });
         });
 
         // ---- Categories ----

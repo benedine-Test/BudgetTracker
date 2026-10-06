@@ -113,6 +113,7 @@ Things to check in your first week:
 | POST | `/api/ingest/apple-pay` | `{amount, merchant, card, date}` all strings → `{message, duplicate, transaction}` |
 | POST | `/api/ingest/card-alert` | Same shape, for parsed bank emails |
 | POST | `/api/income` | `{amount, date, note, kind: "salary"\|"other"\|"refund", cpf?}` — salary opens/tops up the period; `cpf` is added to the CPF holdings |
+| GET/PUT | `/api/profile` | `{birthDate: "yyyy-MM-dd" \| null}` — sets the CPF age band for salaries |
 | GET | `/api/budget/summary?date=yyyy-MM-dd` | Buckets (budget / spent / remaining / % / status / daily allowance), top categories, uncategorised |
 | GET | `/api/budget/history` | Budget vs actual for each recorded pay period |
 | GET | `/api/budget/periods` | All pay periods |
@@ -141,7 +142,7 @@ Things to check in your first week:
 
 - **Automatic prices.** With `autoPrice: true` the symbol is looked up on Yahoo Finance (ES3.SI, VWRA.L, AAPL, BTC-USD), and every foreign holding's exchange rate is refreshed too. Yahoo's endpoint is unofficial: if it fails, the last price stays and the reason shows on the holding. Prices fetched in the last 15 minutes are skipped unless forced.
 - **Insurance plans (ILPs).** `assetClass: "Policy"`, `units: 1`, `averageCost` = total paid in, `lastPrice` = the value the insurer shows. There is no public price, so the value is updated by hand.
-- **CPF from salary.** A salary recorded with `cpf` (the salary form fills it in when it works pay out from base pay: employee + employer share, 2026 rates, age band from date of birth if given) adds that amount to the `Cpf` holdings dated on payday. With several (OA/SA/MA) it is shared in proportion to their balances, which is only an estimate; the real split depends on age. Entering a new balance takes in everything before it, and deleting the salary takes its CPF back out. Interest is not added.
+- **CPF from salary.** A salary recorded with `cpf` (the salary form fills it in when it works pay out from base pay: employee + employer share, 2026 rates, age band from the date of birth on the Profile page when set) adds that amount to the `Cpf` holdings dated on payday. With several (OA/SA/MA) it is shared in proportion to their balances, which is only an estimate; the real split depends on age. Entering a new balance takes in everything before it, and deleting the salary takes its CPF back out. Interest is not added.
 - **Regular contributions.** `contributionMatch` is text the bank entry contains (e.g. `FWD`), optionally narrowed by `contributionAmount` and `contributionAccountId`. Matching spends after the holding's units/cost were last entered are added on top, at cost, until the figures are updated. A typed-in balance (CPF, an ILP's value) takes in every payment made before it. The bank entry has to be in the app first, usually from a statement import.
 
 ## Deploying

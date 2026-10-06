@@ -379,4 +379,29 @@ public class HoldingSchemaUpgradeTests
         check.CommandText = """SELECT COUNT(*) FROM pragma_table_info('Transactions') WHERE name = 'CpfContribution'""";
         Assert.Equal(1L, check.ExecuteScalar());
     }
+
+    [Fact]
+    public async Task Adds_date_of_birth_to_existing_settings()
+    {
+        using var conn = new SqliteConnection("Data Source=:memory:");
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE "Transactions" ("Id" INTEGER NOT NULL CONSTRAINT "PK_Transactions" PRIMARY KEY AUTOINCREMENT,
+                  "Amount" TEXT NOT NULL, "Merchant" TEXT NOT NULL);
+                CREATE TABLE "Settings" ("Id" INTEGER NOT NULL CONSTRAINT "PK_Settings" PRIMARY KEY AUTOINCREMENT, "PayDay" INTEGER NOT NULL);
+                INSERT INTO "Settings" ("Id", "PayDay") VALUES (1, 25);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        using var db = new BudgetDbContext(new DbContextOptionsBuilder<BudgetDbContext>().UseSqlite(conn).Options);
+        await SchemaUpgrade.ApplyAsync(db);
+        await SchemaUpgrade.ApplyAsync(db);
+
+        using var check = conn.CreateCommand();
+        check.CommandText = """UPDATE "Settings" SET "BirthDate" = '1990-06-15'; SELECT "BirthDate" FROM "Settings" """;
+        Assert.Equal("1990-06-15", check.ExecuteScalar());
+    }
 }

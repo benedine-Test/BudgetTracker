@@ -28,7 +28,7 @@
                 <div>
                     <label for="inc-age">Your age</label>
                     <select id="inc-age" @bind="AgeChoice">
-                        <option value="@FromBirth">From my date of birth</option>
+                        <option value="@FromBirth">From my profile</option>
                         <option value="@CpfAgeBand.UpTo55">55 and below</option>
                         <option value="@CpfAgeBand.Over55To60">Above 55 to 60</option>
                         <option value="@CpfAgeBand.Over60To65">Above 60 to 65</option>
@@ -51,11 +51,13 @@
 
             @if (ageChoice == FromBirth)
             {
-                <label for="inc-dob">Date of birth</label>
-                <input id="inc-dob" type="date" @bind="birthDate" @bind:format="yyyy-MM-dd" />
-                @if (birthDate is not null)
+                @if (birthDate is null)
                 {
-                    <p class="hint">CPF rates for this pay: @BandName(Band). The rate changes the month after you turn 55, 60, 65 and 70.</p>
+                    <p class="hint">Add your date of birth in <a class="link" href="profile">Profile</a> first, or pick your age above.</p>
+                }
+                else
+                {
+                    <p class="hint">CPF rates for this pay, from your profile: @Payslip.BandName(Band).</p>
                 }
             }
 
@@ -132,7 +134,7 @@
     private decimal? basePay;
     private const string FromBirth = "Birth";
     private string ageChoice = CpfAgeBand.UpTo55.ToString();   // a CpfAgeBand, or FromBirth
-    private DateTime? birthDate;
+    private DateOnly? birthDate;   // from the Profile page
     private ShgFund shg = ShgFund.None;
 
     private string AgeChoice
@@ -143,7 +145,7 @@
 
     /// <summary>The band for this pay: worked out from the birthday and the date received, or as picked.</summary>
     private CpfAgeBand Band => ageChoice == FromBirth
-        ? birthDate is { } d ? Payslip.AgeBandOn(DateOnly.FromDateTime(d), DateOnly.FromDateTime(date)) : CpfAgeBand.UpTo55
+        ? birthDate is { } d ? Payslip.AgeBandOn(d, DateOnly.FromDateTime(date)) : CpfAgeBand.UpTo55
         : Enum.Parse<CpfAgeBand>(ageChoice);
 
     private bool UseBase => kind == "salary" && fromBase;
@@ -161,10 +163,15 @@
 
         try
         {
+            birthDate = (await Api.Profile()).BirthDate;
+        }
+        catch (ApiException) { /* pick the age band by hand instead */ }
+
+        try
+        {
             fromBase = await JS.InvokeAsync<string?>("budget.getPref", "salaryFromBase") == "1";
-            AgeChoice = await JS.InvokeAsync<string?>("budget.getPref", "cpfAge") ?? ageChoice;
-            if (DateTime.TryParseExact(await JS.InvokeAsync<string?>("budget.getPref", "birthDate"), "yyyy-MM-dd",
-                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dob)) birthDate = dob;
+            // Nothing picked on this phone yet: a date of birth in the profile decides.
+            AgeChoice = await JS.InvokeAsync<string?>("budget.getPref", "cpfAge") ?? (birthDate is null ? ageChoice : FromBirth);
             if (Enum.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "shgFund"), out ShgFund f)) shg = f;
             if (decimal.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "basePay"),
                     System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var p)) basePay = p;
@@ -183,7 +190,7 @@
         {
             if (ageChoice == FromBirth && birthDate is null)
             {
-                error = "Enter your date of birth, or pick your age band.";
+                error = "Add your date of birth in Profile, or pick your age band.";
                 return;
             }
             if (Breakdown is not { TakeHome: > 0 } b)
@@ -233,15 +240,6 @@
         return shg == ShgFund.None ? text : $"{text}, {Payslip.ShgName(shg)} {Fmt.Money(-b.Shg)}";
     }
 
-    private static string BandName(CpfAgeBand band) => band switch
-    {
-        CpfAgeBand.UpTo55 => "55 and below",
-        CpfAgeBand.Over55To60 => "above 55 to 60",
-        CpfAgeBand.Over60To65 => "above 60 to 65",
-        CpfAgeBand.Over65To70 => "above 65 to 70",
-        _ => "above 70",
-    };
-
     private async Task RememberChoices()
     {
         try
@@ -249,8 +247,6 @@
             await JS.InvokeVoidAsync("budget.setPref", "salaryFromBase", fromBase ? "1" : "0");
             if (!fromBase) return;
             await JS.InvokeVoidAsync("budget.setPref", "cpfAge", ageChoice);
-            if (birthDate is { } dob)
-                await JS.InvokeVoidAsync("budget.setPref", "birthDate", dob.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
             await JS.InvokeVoidAsync("budget.setPref", "shgFund", shg.ToString());
             await JS.InvokeVoidAsync("budget.setPref", "basePay", basePay!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }

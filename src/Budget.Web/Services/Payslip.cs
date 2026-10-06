@@ -60,6 +60,39 @@ public static class Payslip
             : CpfAgeBand.UpTo55;
     }
 
+    /// <summary>The next change of age band after <paramref name="today"/>, and what it changes to. Null once above 70.</summary>
+    public static (DateOnly From, CpfAgeBand Band)? NextBandChange(DateOnly birthDate, DateOnly today)
+    {
+        foreach (var (age, band) in new[]
+                 {
+                     (55, CpfAgeBand.Over55To60), (60, CpfAgeBand.Over60To65),
+                     (65, CpfAgeBand.Over65To70), (70, CpfAgeBand.Over70),
+                 })
+        {
+            var birthday = birthDate.AddYears(age);
+            var from = new DateOnly(birthday.Year, birthday.Month, 1).AddMonths(1);
+            if (from > today) return (from, band);
+        }
+        return null;
+    }
+
+    /// <summary>Completed years on <paramref name="today"/>.</summary>
+    public static int AgeOn(DateOnly birthDate, DateOnly today)
+    {
+        var age = today.Year - birthDate.Year;
+        return birthDate.AddYears(age) > today ? age - 1 : age;
+    }
+
+    public static string BandName(CpfAgeBand band) => band switch
+    {
+        CpfAgeBand.UpTo55 => "55 and below",
+        CpfAgeBand.Over55To60 => "above 55 to 60",
+        CpfAgeBand.Over60To65 => "above 60 to 65",
+        CpfAgeBand.Over65To70 => "above 65 to 70",
+        CpfAgeBand.Over70 => "above 70",
+        _ => "no CPF",
+    };
+
     /// <summary>
     /// Total CPF for the month, employer and employee together, rounded to the nearest dollar.
     /// Nothing up to S$50; employer only up to S$500; employee share phased in up to S$750.

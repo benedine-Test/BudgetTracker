@@ -177,6 +177,8 @@ public class AppSettings
     public decimal SavingsPct { get; set; } = 20;
     public string TimeZoneId { get; set; } = "Asia/Singapore";
     public string BaseCurrency { get; set; } = "SGD";
+    /// <summary>From the Profile page. Sets the CPF age band for each salary (see Payslip.AgeBandOn).</summary>
+    public DateOnly? BirthDate { get; set; }
 }
 
 public enum AssetClass

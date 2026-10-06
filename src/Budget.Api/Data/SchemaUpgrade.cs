@@ -144,6 +144,15 @@ public static class SchemaUpgrade
                     : "ALTER TABLE \"Transactions\" ADD COLUMN \"CpfContribution\" TEXT NULL;", ct);
             }
 
+            // ---- Date of birth on the Profile page ----
+            if (await TableExistsAsync(conn, "Settings", sqlServer, ct)
+                && !await ColumnExistsAsync(conn, "Settings", "BirthDate", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Settings] ADD [BirthDate] date NULL;"
+                    : "ALTER TABLE \"Settings\" ADD COLUMN \"BirthDate\" TEXT NULL;", ct);
+            }
+
             // ---- Automatic prices and regular contributions on holdings ----
             if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
                 && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))
