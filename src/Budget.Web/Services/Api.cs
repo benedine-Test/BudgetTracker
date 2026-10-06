@@ -17,7 +17,27 @@ public record BudgetSummary(DateOnly PeriodStart, DateOnly PeriodEndExclusive, i
 
 public record TransactionDto(int Id, DateTimeOffset OccurredAt, decimal Amount, string Currency, bool IsIncome,
     string Merchant, string? Card, string? Notes, string Source, string? MergedSources,
-    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed);
+    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account);
+
+public record AccountDto(int Id, string Name, string Kind, string Currency, decimal Balance,
+    decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived, DateTimeOffset? LastImportAt);
+
+public record AccountsSummary(decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
+    int UnassignedSinceOldest, List<AccountDto> Accounts);
+
+public record ColumnMap(string? Date, List<string>? Description, string? Debit, string? Credit,
+    string? Amount, string? Direction, string? Balance);
+
+public record ImportPreviewRow(int Index, DateOnly Date, string Description, decimal Amount, bool IsCredit, decimal? Balance,
+    string Status, int? MatchId, string? MatchText, bool SuggestSalary, string? Category);
+
+public record ImportPreview(List<string> Headers, ColumnMap Columns, bool PositiveIsSpend, List<ImportPreviewRow> Rows,
+    int SkippedLines, decimal? StatementBalance, DateOnly? StatementBalanceDate, decimal? AppBalanceThatDayAfterImport,
+    string? Problem);
+
+public record ImportRowIn(DateOnly Date, string Description, decimal Amount, bool IsCredit, bool IsSalary);
+
+public record ImportResult(int Added, int Linked, int SalariesRecorded, decimal Balance, string Message);
 
 public record CategoryDto(int Id, string Name, string Bucket, bool IsArchived);
 
@@ -55,13 +75,14 @@ public class Api(HttpClient http)
 
     public Task SaveSettings(SettingsDto s) => Send(HttpMethod.Put, "api/settings", s);
 
-    public Task RecordIncome(decimal amount, string kind, string? date, string? note) =>
-        Send(HttpMethod.Post, "api/income", new { amount, kind, date, note });
+    public Task RecordIncome(decimal amount, string kind, string? date, string? note, int? accountId) =>
+        Send(HttpMethod.Post, "api/income", new { amount, kind, date, note, accountId });
 
     // ---- Transactions ----
-    public Task<List<TransactionDto>> Transactions(string? filter, string? from, string? to, string? search)
+    public Task<List<TransactionDto>> Transactions(string? filter, string? from, string? to, string? search, int? accountId = null)
     {
         var parts = new List<string> { "take=300" };
+        if (accountId is int aid) parts.Add($"accountId={aid}");
         switch (filter)
         {
             case "sort": parts.Add("uncategorised=true"); break;
@@ -73,8 +94,15 @@ public class Api(HttpClient http)
         return Get<List<TransactionDto>>("api/transactions?" + string.Join('&', parts));
     }
 
-    public Task AddSpend(decimal amount, string merchant, int? categoryId, string date, string? notes) =>
-        Send(HttpMethod.Post, "api/transactions", new { amount, merchant, categoryId, date, notes });
+    public Task AddSpend(decimal amount, string merchant, int? categoryId, string date, string? notes, int? accountId) =>
+        Send(HttpMethod.Post, "api/transactions", new { amount, merchant, categoryId, date, notes, accountId });
+
+    /// <summary>accountId 0 takes the entry off its account.</summary>
+    public async Task<TransactionDto> MoveToAccount(int id, int accountId)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/transactions/{id}", new { accountId });
+        return (await r.Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+    }
 
     public async Task<CategoriseResult> Categorise(int id, int categoryId, bool learnRule)
     {
@@ -90,6 +118,28 @@ public class Api(HttpClient http)
         using var r = await Send(HttpMethod.Get, "api/export/transactions.csv");
         return await r.Content.ReadAsByteArrayAsync();
     }
+
+    // ---- Accounts ----
+    public Task<AccountsSummary> Accounts(bool archived = false) =>
+        Get<AccountsSummary>("api/accounts" + (archived ? "?archived=true" : ""));
+
+    public Task AddAccount(string name, string kind, decimal balance, string? cardNames) =>
+        Send(HttpMethod.Post, "api/accounts", new { name, kind, balance, cardNames });
+
+    public Task UpdateAccount(int id, string? name, string? kind, string? cardNames, bool? isArchived) =>
+        Send(HttpMethod.Put, $"api/accounts/{id}", new { name, kind, cardNames, isArchived });
+
+    /// <summary>"The bank shows this now" — the balance counts on from here.</summary>
+    public Task SetBalance(int id, decimal balance) =>
+        Send(HttpMethod.Put, $"api/accounts/{id}/balance", new { balance });
+
+    public Task DeleteAccount(int id) => Send(HttpMethod.Delete, $"api/accounts/{id}");
+
+    public Task<ImportPreview> PreviewImport(int id, string csv, bool? positiveIsSpend, ColumnMap? columns) =>
+        Post<ImportPreview>($"api/accounts/{id}/import/preview", new { csv, positiveIsSpend, columns });
+
+    public Task<ImportResult> CommitImport(int id, List<ImportRowIn> add, List<int> link, decimal? statementBalance, DateOnly? statementBalanceDate) =>
+        Post<ImportResult>($"api/accounts/{id}/import", new { add, link, statementBalance, statementBalanceDate });
 
     // ---- Categories ----
     public Task<List<CategoryDto>> Categories() => Get<List<CategoryDto>>("api/categories");
@@ -130,6 +180,12 @@ public class Api(HttpClient http)
     private async Task<T> Get<T>(string url)
     {
         using var r = await Send(HttpMethod.Get, url);
+        return (await r.Content.ReadFromJsonAsync<T>(Json))!;
+    }
+
+    private async Task<T> Post<T>(string url, object body)
+    {
+        using var r = await Send(HttpMethod.Post, url, body);
         return (await r.Content.ReadFromJsonAsync<T>(Json))!;
     }
 

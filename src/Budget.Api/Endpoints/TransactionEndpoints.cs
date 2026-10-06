@@ -13,15 +13,16 @@ namespace Budget.Api.Endpoints;
 /// </summary>
 public record ApplePayIngest(string? Amount, string? Merchant, string? Card, string? Date, string? Name);
 
-public record SpendCreate(decimal Amount, string Merchant, string? Currency, string? Date, int? CategoryId, string? Notes, string? Card);
-public record IncomeCreate(decimal Amount, string? Date, string? Note, string? Kind); // Kind: salary (default) | other | refund
-public record TransactionUpdate(decimal? Amount, string? Merchant, string? Date, string? Notes, int? CategoryId);
+public record SpendCreate(decimal Amount, string Merchant, string? Currency, string? Date, int? CategoryId, string? Notes, string? Card, int? AccountId);
+public record IncomeCreate(decimal Amount, string? Date, string? Note, string? Kind, int? AccountId); // Kind: salary (default) | other | refund
+/// <summary>AccountId 0 takes the entry off its account.</summary>
+public record TransactionUpdate(decimal? Amount, string? Merchant, string? Date, string? Notes, int? CategoryId, int? AccountId);
 public record Categorise(int CategoryId, bool LearnRule = true, string? Pattern = null, bool ApplyToSimilar = true);
 
 public record TransactionDto(
     int Id, DateTimeOffset OccurredAt, decimal Amount, string Currency, bool IsIncome,
     string Merchant, string? Card, string? Notes, string Source, string? MergedSources,
-    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed);
+    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account);
 
 public static class TransactionEndpoints
 {
@@ -30,7 +31,7 @@ public static class TransactionEndpoints
         new DateTimeOffset(DateTime.SpecifyKind(t.OccurredAtUtc, DateTimeKind.Utc)).ToOffset(TimeSpan.FromHours(8)),
         t.Amount, t.Currency, t.IsIncome, t.Merchant, t.CardName, t.Notes,
         t.Source.ToString(), t.MergedSources, t.CategoryId, t.Category?.Name, t.Category?.Bucket.ToString(),
-        t.CategoryConfirmed);
+        t.CategoryConfirmed, t.AccountId, t.Account?.Name);
 
     public static void MapTransactionEndpoints(this RouteGroupBuilder api)
     {
@@ -52,6 +53,8 @@ public static class TransactionEndpoints
             if (string.IsNullOrWhiteSpace(body.Merchant)) return Results.BadRequest(new { message = "Merchant is required." });
             if (body.CategoryId is int cid && !await db.Categories.AnyAsync(c => c.Id == cid, ct))
                 return Results.BadRequest(new { message = $"Category {cid} doesn't exist." });
+            if (body.AccountId is int aid && !await db.Accounts.AnyAsync(a => a.Id == aid, ct))
+                return Results.BadRequest(new { message = $"Account {aid} doesn't exist." });
 
             var settings = await budgets.GetSettingsAsync(ct);
             var tx = new Transaction
@@ -63,26 +66,30 @@ public static class TransactionEndpoints
                 CardName = body.Card,
                 Notes = body.Notes,
                 Source = TransactionSource.Manual,
+                AccountId = body.AccountId,
                 CategoryId = body.CategoryId ?? await cat.MatchAsync(body.Merchant, ct),
                 CategoryConfirmed = body.CategoryId is not null
             };
+            await svc.LinkByCardAsync(tx, ct);
             db.Transactions.Add(tx);
             await svc.AbsorbPendingFaresAsync(tx, ct);
             await db.SaveChangesAsync(ct);
-            await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
+            await LoadRefsAsync(db, tx, ct);
             return Results.Created($"/api/transactions/{tx.Id}", ToDto(tx));
         });
 
         api.MapPost("/income", async (IncomeCreate body, BudgetService budgets, BudgetDbContext db, Clock clock, CancellationToken ct) =>
         {
             if (body.Amount <= 0) return Results.BadRequest(new { message = "Amount must be positive." });
+            if (body.AccountId is int aid && !await db.Accounts.AnyAsync(a => a.Id == aid, ct))
+                return Results.BadRequest(new { message = $"Account {aid} doesn't exist." });
             var when = clock.ParseToUtc(body.Date);
             var kind = (body.Kind ?? "salary").ToLowerInvariant();
 
             if (kind == "salary")
             {
-                var (tx, period) = await budgets.RecordSalaryAsync(Math.Round(body.Amount, 2), when, body.Note, ct);
-                await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
+                var (tx, period) = await budgets.RecordSalaryAsync(Math.Round(body.Amount, 2), when, body.Note, body.AccountId, ct: ct);
+                await LoadRefsAsync(db, tx, ct);
                 return Results.Ok(new
                 {
                     transaction = ToDto(tx),
@@ -100,19 +107,19 @@ public static class TransactionEndpoints
             {
                 OccurredAtUtc = when, Amount = Math.Round(body.Amount, 2), IsIncome = true,
                 Merchant = body.Note ?? catName, Source = TransactionSource.Manual,
-                CategoryId = cat.Id, CategoryConfirmed = true
+                AccountId = body.AccountId, CategoryId = cat.Id, CategoryConfirmed = true
             };
             db.Transactions.Add(other);
             await db.SaveChangesAsync(ct);
-            other.Category = cat;
+            await LoadRefsAsync(db, other, ct);
             return Results.Ok(new { transaction = ToDto(other) });
         });
 
         api.MapGet("/transactions", async (BudgetDbContext db, Clock clock,
             string? from, string? to, int? categoryId, string? bucket, bool? uncategorised, string? q, int? take,
-            CancellationToken ct) =>
+            int? accountId, CancellationToken ct) =>
         {
-            var query = db.Transactions.AsNoTracking().Include(t => t.Category).AsQueryable();
+            var query = db.Transactions.AsNoTracking().Include(t => t.Category).Include(t => t.Account).AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(from))
             {
@@ -127,6 +134,7 @@ public static class TransactionEndpoints
                 query = query.Where(t => t.OccurredAtUtc < toUtc);
             }
             if (categoryId is int cid) query = query.Where(t => t.CategoryId == cid);
+            if (accountId is int aid) query = aid == 0 ? query.Where(t => t.AccountId == null) : query.Where(t => t.AccountId == aid);
             if (uncategorised == true) query = query.Where(t => t.CategoryId == null);
             if (!string.IsNullOrWhiteSpace(bucket) && Enum.TryParse<Bucket>(bucket, true, out var b))
                 query = query.Where(t => t.Category != null && t.Category.Bucket == b);
@@ -142,7 +150,7 @@ public static class TransactionEndpoints
         });
 
         api.MapGet("/transactions/{id:int}", async (int id, BudgetDbContext db, CancellationToken ct) =>
-            await db.Transactions.Include(t => t.Category).FirstOrDefaultAsync(t => t.Id == id, ct) is { } t
+            await db.Transactions.Include(t => t.Category).Include(t => t.Account).FirstOrDefaultAsync(t => t.Id == id, ct) is { } t
                 ? Results.Ok(ToDto(t)) : Results.NotFound());
 
         api.MapPut("/transactions/{id:int}", async (int id, TransactionUpdate body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
@@ -160,8 +168,14 @@ public static class TransactionEndpoints
                 t.CategoryId = cid;
                 t.CategoryConfirmed = true;
             }
+            if (body.AccountId is int aid)
+            {
+                if (aid != 0 && !await db.Accounts.AnyAsync(a => a.Id == aid, ct))
+                    return Results.BadRequest(new { message = $"Account {aid} doesn't exist." });
+                t.AccountId = aid == 0 ? null : aid;
+            }
             await db.SaveChangesAsync(ct);
-            await db.Entry(t).Reference(x => x.Category).LoadAsync(ct);
+            await LoadRefsAsync(db, t, ct);
             return Results.Ok(ToDto(t));
         });
 
@@ -199,7 +213,7 @@ public static class TransactionEndpoints
             }
 
             await db.SaveChangesAsync(ct);
-            await db.Entry(t).Reference(x => x.Category).LoadAsync(ct);
+            await LoadRefsAsync(db, t, ct);
             return Results.Ok(new { transaction = ToDto(t), learnedPattern = pattern, reFiled });
         });
 
@@ -239,6 +253,12 @@ public static class TransactionEndpoints
             clock.ParseToUtc(body.Date), source, null, ct);
 
         return Results.Ok(new { message = result.Message, duplicate = result.WasDuplicate, transaction = ToDto(result.Transaction) });
+    }
+
+    private static async Task LoadRefsAsync(BudgetDbContext db, Transaction t, CancellationToken ct)
+    {
+        await db.Entry(t).Reference(x => x.Category).LoadAsync(ct);
+        await db.Entry(t).Reference(x => x.Account).LoadAsync(ct);
     }
 
     private static string? FirstNonBlank(params string?[] values) =>

@@ -10,6 +10,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<BudgetPeriod> BudgetPeriods => Set<BudgetPeriod>();
     public DbSet<AppSettings> Settings => Set<AppSettings>();
     public DbSet<Holding> Holdings => Set<Holding>();
+    public DbSet<Account> Accounts => Set<Account>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -22,6 +23,16 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(t => t.Amount).HasPrecision(18, 2);
             e.Property(t => t.Merchant).HasMaxLength(200);
             e.HasIndex(t => t.OccurredAtUtc);
+            // Deleting an account keeps its history, just unlinked.
+            e.HasOne(t => t.Account).WithMany().HasForeignKey(t => t.AccountId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<Account>(e =>
+        {
+            e.Property(a => a.Name).HasMaxLength(100);
+            e.Property(a => a.Currency).HasMaxLength(3);
+            e.Property(a => a.CardNames).HasMaxLength(500);
+            e.Property(a => a.AnchorBalance).HasPrecision(18, 2);
         });
 
         b.Entity<BudgetPeriod>(e =>

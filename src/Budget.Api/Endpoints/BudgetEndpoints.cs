@@ -149,14 +149,14 @@ public static class BudgetEndpoints
         // ---- Export ----
         api.MapGet("/export/transactions.csv", async (BudgetDbContext db, CancellationToken ct) =>
         {
-            var rows = await db.Transactions.AsNoTracking().Include(t => t.Category)
+            var rows = await db.Transactions.AsNoTracking().Include(t => t.Category).Include(t => t.Account)
                 .OrderBy(t => t.OccurredAtUtc).ToListAsync(ct);
-            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Card,Source,Notes\n");
+            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Account,Card,Source,Notes\n");
             foreach (var t in rows.Select(TransactionEndpoints.ToDto))
                 sb.AppendLine(string.Join(',',
                     t.OccurredAt.ToString("yyyy-MM-dd HH:mm"), t.Amount.ToString("0.00"), t.Currency,
                     t.IsIncome ? "Income" : "Spend", Csv(t.Merchant), Csv(t.Category), t.Bucket ?? "",
-                    Csv(t.Card), t.Source, Csv(t.Notes)));
+                    Csv(t.Account), Csv(t.Card), t.Source, Csv(t.Notes)));
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "transactions.csv");
         });
     }

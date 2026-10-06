@@ -8,6 +8,13 @@
 <header class="topbar">
     <div>
         <h1>Spending</h1>
+        @if (AccountFilter is not null)
+        {
+            <p class="sub">
+                @AccountLabel
+                <button type="button" class="link" @onclick="ClearAccount">Show all accounts</button>
+            </p>
+        }
         @if (HasRange)
         {
             <p class="sub">
@@ -101,6 +108,17 @@ else
         <p class="muted">
             @Fmt.When(selected.OccurredAt) · @Fmt.Source(selected.Source)@(string.IsNullOrWhiteSpace(selected.Card) ? "" : $" · {selected.Card}")
         </p>
+        @if (accounts.Count > 0)
+        {
+            <label for="tx-acc">Account</label>
+            <select id="tx-acc" value="@(selected.AccountId ?? 0)" disabled="@busy" @onchange="MoveAccount">
+                <option value="0">Not filed under an account</option>
+                @foreach (var a in accounts)
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+        }
         @if (!string.IsNullOrWhiteSpace(selected.Notes))
         {
             <p class="muted">@selected.Notes</p>
@@ -156,6 +174,18 @@ else
                 }
             </select>
 
+            @if (accounts.Count > 0)
+            {
+                <label for="add-acc">Paid from</label>
+                <select id="add-acc" @bind="newAccountId">
+                    <option value="0">Not sure / skip</option>
+                    @foreach (var a in accounts)
+                    {
+                        <option value="@a.Id">@a.Name</option>
+                    }
+                </select>
+            }
+
             <label for="add-when">When</label>
             <input id="add-when" type="datetime-local" @bind="newWhen" @bind:format="yyyy-MM-ddTHH:mm" />
 
@@ -181,9 +211,14 @@ else
     [SupplyParameterFromQuery] public string? Filter { get; set; }
     [SupplyParameterFromQuery] public string? From { get; set; }
     [SupplyParameterFromQuery] public string? To { get; set; }
+    /// <summary>An account id, or "none" for entries not filed under any account.</summary>
+    [SupplyParameterFromQuery(Name = "account")] public string? AccountParam { get; set; }
 
     private List<TransactionDto>? items;
     private List<CategoryDto> categories = [];
+    private List<AccountDto> accounts = [];
+    private bool accountsLoaded;
+    private int newAccountId;
     private string? error;
     private string search = "";
     private CancellationTokenSource? searchDelay;
@@ -202,6 +237,9 @@ else
     private string? formError;
 
     private string Current => Filters.Any(f => f.Value == Filter) ? Filter! : "all";
+    private int? AccountFilter => AccountParam == "none" ? 0 : int.TryParse(AccountParam, out var id) ? id : null;
+    private string AccountLabel => AccountFilter == 0 ? "Not filed under an account"
+        : accounts.FirstOrDefault(a => a.Id == AccountFilter)?.Name ?? "One account";
     private bool HasRange => DateOnly.TryParse(From, out _) && DateOnly.TryParse(To, out _);
     private string RangeLabel => Fmt.Range(DateOnly.Parse(From!), DateOnly.Parse(To!).AddDays(1));
 
@@ -225,7 +263,12 @@ else
         try
         {
             if (categories.Count == 0) categories = await Api.Categories();
-            items = await Api.Transactions(Current, HasRange ? From : null, HasRange ? To : null, search);
+            if (!accountsLoaded)
+            {
+                accounts = (await Api.Accounts()).Accounts;
+                accountsLoaded = true;
+            }
+            items = await Api.Transactions(Current, HasRange ? From : null, HasRange ? To : null, search, AccountFilter);
         }
         catch (ApiException e)
         {
@@ -243,6 +286,32 @@ else
     {
         items = null;
         Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["from"] = null, ["to"] = null }), replace: true);
+    }
+
+    private void ClearAccount()
+    {
+        items = null;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("account", (string?)null), replace: true);
+    }
+
+    private async Task MoveAccount(ChangeEventArgs e)
+    {
+        if (selected is null || busy || !int.TryParse(e.Value?.ToString(), out var id)) return;
+        busy = true;
+        try
+        {
+            selected = await Api.MoveToAccount(selected.Id, id);
+            Toast.Show(id == 0 ? "Taken off its account." : $"Filed under {selected.Account}.");
+            await Load();
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
     }
 
     private async Task SearchChanged(ChangeEventArgs e)
@@ -271,6 +340,7 @@ else
         newAmount = null;
         newMerchant = "";
         newCategoryId = 0;
+        newAccountId = AccountFilter is > 0 ? AccountFilter.Value : 0;
         newNotes = null;
         formError = null;
         var now = DateTime.Now;
@@ -356,7 +426,7 @@ else
                 TimeZoneInfo.Local.GetUtcOffset(newWhen));
             await Api.AddSpend(newAmount.Value, newMerchant.Trim(), newCategoryId == 0 ? null : newCategoryId,
                 when.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture),
-                string.IsNullOrWhiteSpace(newNotes) ? null : newNotes.Trim());
+                string.IsNullOrWhiteSpace(newNotes) ? null : newNotes.Trim(), newAccountId == 0 ? null : newAccountId);
             Toast.Show("Added.");
             adding = false;
             await Load();

@@ -37,7 +37,8 @@ public class BudgetService(BudgetDbContext db, Clock clock)
     /// the budget period with the current 50/30/20 split.
     /// </summary>
     public async Task<(Transaction Tx, BudgetPeriod Period)> RecordSalaryAsync(
-        decimal amount, DateTime occurredAtUtc, string? note, CancellationToken ct = default)
+        decimal amount, DateTime occurredAtUtc, string? note, int? accountId = null,
+        TransactionSource source = TransactionSource.Manual, CancellationToken ct = default)
     {
         var settings = await GetSettingsAsync(ct);
         var salaryCat = await db.Categories.SingleAsync(c => c.Name == "Salary", ct);
@@ -50,7 +51,8 @@ public class BudgetService(BudgetDbContext db, Clock clock)
             IsIncome = true,
             Merchant = "Salary",
             Notes = note,
-            Source = TransactionSource.Manual,
+            Source = source,
+            AccountId = accountId,
             CategoryId = salaryCat.Id,
             CategoryConfirmed = true
         };
