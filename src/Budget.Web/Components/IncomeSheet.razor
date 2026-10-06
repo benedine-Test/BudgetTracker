@@ -27,7 +27,8 @@
             <div class="two">
                 <div>
                     <label for="inc-age">Your age</label>
-                    <select id="inc-age" @bind="ageBand">
+                    <select id="inc-age" @bind="AgeChoice">
+                        <option value="@FromBirth">From my date of birth</option>
                         <option value="@CpfAgeBand.UpTo55">55 and below</option>
                         <option value="@CpfAgeBand.Over55To60">Above 55 to 60</option>
                         <option value="@CpfAgeBand.Over60To65">Above 60 to 65</option>
@@ -48,6 +49,16 @@
                 </div>
             </div>
 
+            @if (ageChoice == FromBirth)
+            {
+                <label for="inc-dob">Date of birth</label>
+                <input id="inc-dob" type="date" @bind="birthDate" @bind:format="yyyy-MM-dd" />
+                @if (birthDate is not null)
+                {
+                    <p class="hint">CPF rates for this pay: @BandName(Band). The rate changes the month after you turn 55, 60, 65 and 70.</p>
+                }
+            }
+
             @if (Breakdown is { } b)
             {
                 <div class="rows payslip">
@@ -58,9 +69,14 @@
                         <div class="row static"><span class="row-main">@Payslip.ShgName(shg)</span><span>@Fmt.Money(-b.Shg)</span></div>
                     }
                     <div class="row static total"><span class="row-main">Take-home</span><span>@Fmt.Money(b.TakeHome)</span></div>
+                    @if (b.TotalCpf > 0)
+                    {
+                        <div class="row static"><span class="row-main muted">Employer CPF (@Fmt.Percent(Payslip.EmployerRatePct(Band)))</span><span class="muted">@Fmt.Money(b.EmployerCpf)</span></div>
+                        <div class="row static"><span class="row-main muted">Into your CPF this month</span><span class="muted">@Fmt.Money(b.TotalCpf)</span></div>
+                    }
                 </div>
             }
-            <p class="hint">2026 rates for citizens and PRs from their third year. CPF stops at S$8,000 of pay. Bonuses and allowances aren't included — if your payslip shows a different take-home, untick this and type that instead.</p>
+            <p class="hint">2026 rates for citizens and PRs from their third year. CPF stops at S$8,000 of pay. Your CPF holdings on the Invest screen go up by the CPF shown. Bonuses and allowances aren't included — if your payslip shows a different take-home, untick this and type that instead.</p>
         }
         else
         {
@@ -114,11 +130,24 @@
     // Base-pay mode. Remembered on this phone so payday is one number.
     private bool fromBase;
     private decimal? basePay;
-    private CpfAgeBand ageBand = CpfAgeBand.UpTo55;
+    private const string FromBirth = "Birth";
+    private string ageChoice = CpfAgeBand.UpTo55.ToString();   // a CpfAgeBand, or FromBirth
+    private DateTime? birthDate;
     private ShgFund shg = ShgFund.None;
 
+    private string AgeChoice
+    {
+        get => ageChoice;
+        set => ageChoice = value == FromBirth || Enum.TryParse<CpfAgeBand>(value, out _) ? value : CpfAgeBand.UpTo55.ToString();
+    }
+
+    /// <summary>The band for this pay: worked out from the birthday and the date received, or as picked.</summary>
+    private CpfAgeBand Band => ageChoice == FromBirth
+        ? birthDate is { } d ? Payslip.AgeBandOn(DateOnly.FromDateTime(d), DateOnly.FromDateTime(date)) : CpfAgeBand.UpTo55
+        : Enum.Parse<CpfAgeBand>(ageChoice);
+
     private bool UseBase => kind == "salary" && fromBase;
-    private PayslipBreakdown? Breakdown => basePay is > 0 ? Payslip.From(basePay.Value, ageBand, shg) : null;
+    private PayslipBreakdown? Breakdown => basePay is > 0 ? Payslip.From(basePay.Value, Band, shg) : null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -133,7 +162,9 @@
         try
         {
             fromBase = await JS.InvokeAsync<string?>("budget.getPref", "salaryFromBase") == "1";
-            if (Enum.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "cpfAge"), out CpfAgeBand a)) ageBand = a;
+            AgeChoice = await JS.InvokeAsync<string?>("budget.getPref", "cpfAge") ?? ageChoice;
+            if (DateTime.TryParseExact(await JS.InvokeAsync<string?>("budget.getPref", "birthDate"), "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dob)) birthDate = dob;
             if (Enum.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "shgFund"), out ShgFund f)) shg = f;
             if (decimal.TryParse(await JS.InvokeAsync<string?>("budget.getPref", "basePay"),
                     System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var p)) basePay = p;
@@ -146,15 +177,22 @@
         if (busy) return;
 
         decimal value;
+        decimal? cpf = null;
         var saveNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         if (UseBase)
         {
+            if (ageChoice == FromBirth && birthDate is null)
+            {
+                error = "Enter your date of birth, or pick your age band.";
+                return;
+            }
             if (Breakdown is not { TakeHome: > 0 } b)
             {
                 error = "Enter your base pay above zero.";
                 return;
             }
             value = b.TakeHome;
+            cpf = b.TotalCpf;
             saveNote ??= BreakdownNote(b);
         }
         else if (amount is > 0)
@@ -172,9 +210,11 @@
         try
         {
             // Midday keeps the entry on the chosen date whatever the time zone handling.
-            await Api.RecordIncome(value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", saveNote, accountId == 0 ? null : accountId);
+            await Api.RecordIncome(value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", saveNote, accountId == 0 ? null : accountId, cpf);
             if (kind == "salary") await RememberChoices();
-            Toast.Show(kind == "salary" ? "Salary recorded. Budget updated." : "Income recorded.");
+            Toast.Show(kind != "salary" ? "Income recorded."
+                : cpf is > 0 ? $"Salary recorded. Budget updated, {Fmt.Money(cpf.Value)} added to CPF."
+                : "Salary recorded. Budget updated.");
             await OnSaved.InvokeAsync();
         }
         catch (ApiException e)
@@ -189,9 +229,18 @@
 
     private string BreakdownNote(PayslipBreakdown b)
     {
-        var text = $"Base {Fmt.Money(b.BasePay)}, CPF {Fmt.Money(-b.EmployeeCpf)}";
+        var text = $"Base {Fmt.Money(b.BasePay)}, CPF {Fmt.Money(-b.EmployeeCpf)}, employer CPF {Fmt.Money(b.EmployerCpf)}";
         return shg == ShgFund.None ? text : $"{text}, {Payslip.ShgName(shg)} {Fmt.Money(-b.Shg)}";
     }
+
+    private static string BandName(CpfAgeBand band) => band switch
+    {
+        CpfAgeBand.UpTo55 => "55 and below",
+        CpfAgeBand.Over55To60 => "above 55 to 60",
+        CpfAgeBand.Over60To65 => "above 60 to 65",
+        CpfAgeBand.Over65To70 => "above 65 to 70",
+        _ => "above 70",
+    };
 
     private async Task RememberChoices()
     {
@@ -199,7 +248,9 @@
         {
             await JS.InvokeVoidAsync("budget.setPref", "salaryFromBase", fromBase ? "1" : "0");
             if (!fromBase) return;
-            await JS.InvokeVoidAsync("budget.setPref", "cpfAge", ageBand.ToString());
+            await JS.InvokeVoidAsync("budget.setPref", "cpfAge", ageChoice);
+            if (birthDate is { } dob)
+                await JS.InvokeVoidAsync("budget.setPref", "birthDate", dob.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
             await JS.InvokeVoidAsync("budget.setPref", "shgFund", shg.ToString());
             await JS.InvokeVoidAsync("budget.setPref", "basePay", basePay!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }

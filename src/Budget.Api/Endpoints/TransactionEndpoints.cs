@@ -14,7 +14,8 @@ namespace Budget.Api.Endpoints;
 public record ApplePayIngest(string? Amount, string? Merchant, string? Card, string? Date, string? Name);
 
 public record SpendCreate(decimal Amount, string Merchant, string? Currency, string? Date, int? CategoryId, string? Notes, string? Card, int? AccountId);
-public record IncomeCreate(decimal Amount, string? Date, string? Note, string? Kind, int? AccountId); // Kind: salary (default) | other | refund
+// Kind: salary (default) | other | refund. Cpf: on a salary, the CPF paid on it (employee + employer), added to the CPF holdings.
+public record IncomeCreate(decimal Amount, string? Date, string? Note, string? Kind, int? AccountId, decimal? Cpf = null);
 /// <summary>AccountId 0 takes the entry off its account.</summary>
 public record TransactionUpdate(decimal? Amount, string? Merchant, string? Date, string? Notes, int? CategoryId, int? AccountId);
 public record Categorise(int CategoryId, bool LearnRule = true, string? Pattern = null, bool ApplyToSimilar = true);
@@ -81,6 +82,7 @@ public static class TransactionEndpoints
         api.MapPost("/income", async (IncomeCreate body, BudgetService budgets, BudgetDbContext db, Clock clock, CancellationToken ct) =>
         {
             if (body.Amount <= 0) return Results.BadRequest(new { message = "Amount must be positive." });
+            if (body.Cpf is < 0) return Results.BadRequest(new { message = "CPF can't be negative." });
             if (body.AccountId is int aid && !await db.Accounts.AnyAsync(a => a.Id == aid, ct))
                 return Results.BadRequest(new { message = $"Account {aid} doesn't exist." });
             var when = clock.ParseToUtc(body.Date);
@@ -88,7 +90,7 @@ public static class TransactionEndpoints
 
             if (kind == "salary")
             {
-                var (tx, period) = await budgets.RecordSalaryAsync(Math.Round(body.Amount, 2), when, body.Note, body.AccountId, ct: ct);
+                var (tx, period) = await budgets.RecordSalaryAsync(Math.Round(body.Amount, 2), when, body.Note, body.AccountId, cpfContribution: body.Cpf, ct: ct);
                 await LoadRefsAsync(db, tx, ct);
                 return Results.Ok(new
                 {

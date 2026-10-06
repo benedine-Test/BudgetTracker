@@ -135,6 +135,12 @@ public class Transaction
     /// <summary>True once the user has confirmed or corrected the category.</summary>
     public bool CategoryConfirmed { get; set; }
 
+    /// <summary>
+    /// On a salary worked out from base pay: the CPF paid on it, employee and employer together.
+    /// It is added to the CPF holdings (see Portfolio.SalaryCpf); deleting the salary takes it back out.
+    /// </summary>
+    public decimal? CpfContribution { get; set; }
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 

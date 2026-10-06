@@ -216,8 +216,21 @@ public static class BudgetEndpoints
         }
     }
 
-    /// <summary>Bank entries that paid into a holding with a contribution rule (see Portfolio.MatchContributions).</summary>
+    /// <summary>
+    /// Bank entries that paid into a holding with a contribution rule (see Portfolio.MatchContributions),
+    /// plus the CPF paid on salaries, which goes to the CPF holdings (see Portfolio.SalaryCpf).
+    /// </summary>
     public static async Task<IReadOnlyList<Contribution>> ContributionsAsync(
+        BudgetDbContext db, List<Holding> holdings, string baseCurrency, CancellationToken ct)
+    {
+        var salaryCpf = holdings.Any(h => h.AssetClass == AssetClass.Cpf)
+            ? Portfolio.SalaryCpf(holdings, await db.Transactions.AsNoTracking()
+                .Where(t => t.IsIncome && t.CpfContribution != null).ToListAsync(ct))
+            : [];
+        return [.. await BankContributionsAsync(db, holdings, baseCurrency, ct), .. salaryCpf];
+    }
+
+    private static async Task<IReadOnlyList<Contribution>> BankContributionsAsync(
         BudgetDbContext db, List<Holding> holdings, string baseCurrency, CancellationToken ct)
     {
         var texts = holdings.Where(h => !string.IsNullOrWhiteSpace(h.ContributionMatch))

@@ -105,6 +105,10 @@ else
                                 @(h.ContributionCount == 0 ? "· none found yet" : $"· {h.ContributionCount} found, last {h.LastContributionAtUtc!.Value.ToOffset(TimeSpan.FromHours(8)).ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture)}")
                             </span>
                         }
+                        @if (h.SalaryCpfNotInBalanceBase > 0)
+                        {
+                            <span class="muted small">Includes @Fmt.Money(h.SalaryCpfNotInBalanceBase) CPF from salaries since you last entered the balance</span>
+                        }
                         @if (h.NotInFiguresBase > 0 && !IsBalanceClass(h.AssetClass))
                         {
                             <span class="muted small">@Fmt.Money(h.NotInFiguresBase) paid in since you last entered units, counted at cost</span>
@@ -142,6 +146,10 @@ else
 
                 <label for="h-balance">Balance (S$)</label>
                 <input id="h-balance" type="number" inputmode="decimal" step="0.01" min="0" @bind="balance" />
+                @if (assetClass == "Cpf")
+                {
+                    <p class="hint">The figure in the CPF app. Salaries recorded from base pay add their CPF (yours and your employer's) on top until you enter a new figure. Interest isn't added, so update it now and then.</p>
+                }
             }
             else if (IsPolicy)
             {

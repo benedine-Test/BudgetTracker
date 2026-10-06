@@ -8,7 +8,8 @@ public record HoldingValue(
     decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct,
     bool PriceIsStale, bool AutoPrice, string? PriceError,
     string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
-    int ContributionCount, decimal ContributedBase, DateTime? LastContributionAtUtc, decimal NotInFiguresBase);
+    int ContributionCount, decimal ContributedBase, DateTime? LastContributionAtUtc, decimal NotInFiguresBase,
+    decimal SalaryCpfNotInBalanceBase);
 
 public record AllocationSlice(string AssetClass, decimal ValueBase, decimal Percent);
 
@@ -16,8 +17,8 @@ public record PortfolioSummary(
     decimal TotalCostBase, decimal TotalValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct,
     IReadOnlyList<AllocationSlice> Allocation, IReadOnlyList<HoldingValue> Holdings);
 
-/// <summary>A bank entry that paid into a holding.</summary>
-public record Contribution(int HoldingId, int TransactionId, DateTime OccurredAtUtc, decimal Amount);
+/// <summary>A bank entry that paid into a holding, or (FromSalary) the CPF paid on a salary.</summary>
+public record Contribution(int HoldingId, int TransactionId, DateTime OccurredAtUtc, decimal Amount, bool FromSalary = false);
 
 public static class Portfolio
 {
@@ -57,6 +58,35 @@ public static class Portfolio
         return result;
     }
 
+    /// <summary>
+    /// The CPF paid on each salary, added to the CPF holdings. With more than one (OA, SA, MA)
+    /// it is shared out in proportion to their balances: the real split depends on age and the
+    /// retirement sums, so this is a placeholder until the balances are next typed in.
+    /// </summary>
+    public static IReadOnlyList<Contribution> SalaryCpf(IEnumerable<Holding> holdings, IEnumerable<Transaction> salaries)
+    {
+        var cpf = holdings.Where(h => h.AssetClass == AssetClass.Cpf).OrderBy(h => h.Id).ToList();
+        if (cpf.Count == 0) return [];
+        var weights = cpf.Select(h => Math.Max(0m, h.Units * (h.LastPrice ?? h.AverageCost) * h.FxToBase)).ToList();
+        var totalWeight = weights.Sum();
+
+        var result = new List<Contribution>();
+        foreach (var t in salaries)
+        {
+            if (t.CpfContribution is not > 0 || !t.IsIncome) continue;
+            var left = t.CpfContribution.Value;
+            for (var i = 0; i < cpf.Count; i++)
+            {
+                // The last one takes what's left so the shares add up to the cent.
+                var share = i == cpf.Count - 1 ? left
+                    : Math.Round(t.CpfContribution.Value * (totalWeight == 0 ? 1m / cpf.Count : weights[i] / totalWeight), 2);
+                left -= share;
+                if (share > 0) result.Add(new Contribution(cpf[i].Id, t.Id, t.OccurredAtUtc, share, FromSalary: true));
+            }
+        }
+        return result;
+    }
+
     /// <summary>Upper case, single spaces: bank text varies in both.</summary>
     public static string Normalise(string text) =>
         string.Join(' ', text.ToUpperInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
@@ -69,12 +99,14 @@ public static class Portfolio
         var byHolding = contributions.ToLookup(c => c.HoldingId);
         var rows = holdings.Select(h =>
         {
-            var paid = byHolding[h.Id].ToList();
+            var all = byHolding[h.Id].ToList();
+            var paid = all.Where(c => !c.FromSalary).ToList();
             // Money paid in since the figures were last entered isn't in them yet, so it is added
             // at cost. A typed-in balance (CPF, an ILP's value) already includes what was paid before it.
-            var notInCost = paid.Where(c => h.FiguresAsOfUtc is null || c.OccurredAtUtc > h.FiguresAsOfUtc).Sum(c => c.Amount);
+            var notInCost = all.Where(c => h.FiguresAsOfUtc is null || c.OccurredAtUtc > h.FiguresAsOfUtc).Sum(c => c.Amount);
             var valueFrom = h.IsBalance && h.LastPriceAtUtc > h.FiguresAsOfUtc ? h.LastPriceAtUtc : h.FiguresAsOfUtc;
-            var notInValue = paid.Where(c => valueFrom is null || c.OccurredAtUtc > valueFrom).Sum(c => c.Amount);
+            var notInValue = all.Where(c => valueFrom is null || c.OccurredAtUtc > valueFrom).Sum(c => c.Amount);
+            var salaryCpf = all.Where(c => c.FromSalary && (valueFrom is null || c.OccurredAtUtc > valueFrom)).Sum(c => c.Amount);
 
             var cost = Math.Round(h.Units * h.AverageCost * h.FxToBase + notInCost, 2);
             // No price yet → value at cost so totals aren't wildly wrong.
@@ -85,7 +117,7 @@ public static class Portfolio
             return new HoldingValue(h.Id, h.Symbol, h.Name, h.AssetClass.ToString(), h.Platform, h.Units, h.AverageCost, h.Currency, h.FxToBase,
                 h.LastPrice, h.LastPriceAtUtc, cost, value, pnl, pnlPct, stale, h.AutoPrice, h.PriceError,
                 h.ContributionMatch, h.ContributionAmount, h.ContributionAccountId,
-                paid.Count, paid.Sum(c => c.Amount), paid.Count == 0 ? null : paid.Max(c => c.OccurredAtUtc), notInCost);
+                paid.Count, paid.Sum(c => c.Amount), paid.Count == 0 ? null : paid.Max(c => c.OccurredAtUtc), notInCost, salaryCpf);
         }).OrderByDescending(r => r.MarketValueBase).ToList();
 
         var totalCost = rows.Sum(r => r.CostBase);

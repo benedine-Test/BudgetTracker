@@ -244,7 +244,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             var description = r.Description.Trim();
             if (r.IsCredit && r.IsSalary)
             {
-                var (salaryTx, _) = await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id, TransactionSource.StatementImport, ct);
+                var (salaryTx, _) = await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id, TransactionSource.StatementImport, ct: ct);
                 salaryTx.ImportBatchId = batch.Id;
                 await db.SaveChangesAsync(ct);
                 salaries++;

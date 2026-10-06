@@ -136,6 +136,14 @@ public static class SchemaUpgrade
                     : "CREATE INDEX \"IX_Transactions_ImportBatchId\" ON \"Transactions\" (\"ImportBatchId\");", ct);
             }
 
+            // ---- CPF paid on a salary, added to the CPF holdings ----
+            if (!await ColumnExistsAsync(conn, "Transactions", "CpfContribution", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Transactions] ADD [CpfContribution] decimal(18,2) NULL;"
+                    : "ALTER TABLE \"Transactions\" ADD COLUMN \"CpfContribution\" TEXT NULL;", ct);
+            }
+
             // ---- Automatic prices and regular contributions on holdings ----
             if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
                 && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))

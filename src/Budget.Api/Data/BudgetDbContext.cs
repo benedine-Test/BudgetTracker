@@ -22,6 +22,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
         b.Entity<Transaction>(e =>
         {
             e.Property(t => t.Amount).HasPrecision(18, 2);
+            e.Property(t => t.CpfContribution).HasPrecision(18, 2);
             e.Property(t => t.Merchant).HasMaxLength(200);
             e.HasIndex(t => t.OccurredAtUtc);
             // Deleting an account keeps its history, just unlinked.
