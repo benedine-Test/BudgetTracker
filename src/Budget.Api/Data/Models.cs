@@ -72,6 +72,11 @@ public class ImportBatch
     /// <summary>The balance date this import set; if the balance was changed again since, undo leaves it.</summary>
     public DateTime? SetBalanceAsOfUtc { get; set; }
     public decimal? SetAnchorBalance { get; set; }
+    /// <summary>
+    /// Entries on other accounts this import re-filed as Transfer (the other side of a card bill payment),
+    /// as "id:previousCategoryId" pairs, previous empty for none. Put back on undo.
+    /// </summary>
+    public string? Recategorised { get; set; }
     public DateTime? PreviousLastImportAtUtc { get; set; }
     public DateTime? UndoneAtUtc { get; set; }
 }

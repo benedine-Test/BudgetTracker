@@ -73,7 +73,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 
 **Fixing an entry.** Tap any entry under Spending → *Fix this entry* to change its amount, description or date. A salary's amount or date can't be edited there (it set the period's budget) — delete it and record it again.
 
-What it does for you: card bill payments ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD") are filed as **Transfer** so they don't count as spending twice; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
+What it does for you: card bill payments are filed as **Transfer** so they don't count as spending twice — recognised by their wording ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD/DBSC"), and, when both the bank account and the card are in the app, by pairing money out of the bank with the same amount arriving on the card within 5 days, whatever the bank calls it and whichever statement you import first (undo puts the other side back). A card purchase never pairs with money coming into a bank account; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
 
 Limits: scanned PDFs can't be read; Excel files must be saved as CSV first. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
