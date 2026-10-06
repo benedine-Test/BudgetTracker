@@ -182,9 +182,9 @@ else
     <Sheet Title="@($"Import into {selected.Name}")" OnClose="CloseSheets">
         @if (preview is null || preview.Problem is not null)
         {
-            <p class="muted">Pick the <strong>PDF statement</strong> your bank emails or lets you download, or a <strong>CSV</strong> transaction history if your bank offers one (more reliable). Excel files: save as CSV first. Scanned or photographed statements can't be read.</p>
-            <label for="imp-file">Statement file (.pdf or .csv)</label>
-            <InputFile id="imp-file" accept=".pdf,application/pdf,.csv,text/csv,.txt" OnChange="FilePicked" disabled="@busy" />
+            <p class="muted">Pick the <strong>PDF statement</strong> your bank emails or lets you download, or a <strong>CSV or Excel</strong> transaction history if your bank offers one (more reliable). Scanned or photographed statements can't be read.</p>
+            <label for="imp-file">Statement file (.pdf, .csv, .xlsx or .xls)</label>
+            <InputFile id="imp-file" accept=".pdf,application/pdf,.csv,text/csv,.txt,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" OnChange="FilePicked" disabled="@busy" />
             @if (busy)
             {
                 <p class="hint">Reading…</p>
@@ -196,7 +196,7 @@ else
                 @if (preview.NeedsPassword)
                 {
                     <form @onsubmit="() => RunPreview(null)" @onsubmit:preventDefault>
-                        <label for="imp-pw">PDF password</label>
+                        <label for="imp-pw">File password</label>
                         <div class="inline">
                             <input id="imp-pw" type="password" autocomplete="off" @bind="pdfPassword" />
                             <button type="submit" class="btn" disabled="@busy">Open</button>
@@ -347,6 +347,7 @@ else
     private int? confirmUndo;
     private string? csv;
     private string? pdf;            // base64, kept so a password or "swap" can re-read it
+    private string? excel;          // base64, same
     private string? pdfPassword;
     private ImportPreview? preview;
     private bool? positiveIsSpend;
@@ -521,6 +522,7 @@ else
         preview = null;
         csv = null;
         pdf = null;
+        excel = null;
         pdfPassword = null;
         positiveIsSpend = null;
         mapping = new();
@@ -544,8 +546,10 @@ else
             await stream.CopyToAsync(buffer);
             var bytes = buffer.ToArray();
             var isPdf = bytes.Length > 4 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
+            var isExcel = !isPdf && (IsExcel(bytes) || Path.GetExtension(e.File.Name).ToLowerInvariant() is ".xlsx" or ".xls");
             pdf = isPdf ? Convert.ToBase64String(bytes) : null;
-            csv = isPdf ? null : new StreamReader(new MemoryStream(bytes)).ReadToEnd();
+            excel = isExcel ? Convert.ToBase64String(bytes) : null;
+            csv = isPdf || isExcel ? null : new StreamReader(new MemoryStream(bytes)).ReadToEnd();
             pdfPassword = null;
         }
         catch (IOException)
@@ -562,7 +566,7 @@ else
 
     private async Task RunPreview(bool? flip)
     {
-        if (selected is null || (csv is null && pdf is null)) return;
+        if (selected is null || (csv is null && pdf is null && excel is null)) return;
         if (flip is not null) positiveIsSpend = flip;
         ColumnMap? columns = mapping.Values.Any(v => v is not null)
             ? new ColumnMap(mapping.GetValueOrDefault("date"),
@@ -573,8 +577,9 @@ else
 
         await Run(async () =>
         {
-            preview = pdf is not null
-                ? await Api.PreviewPdf(selected.Id, pdf, string.IsNullOrEmpty(pdfPassword) ? null : pdfPassword, positiveIsSpend)
+            var password = string.IsNullOrEmpty(pdfPassword) ? null : pdfPassword;
+            preview = pdf is not null ? await Api.PreviewPdf(selected.Id, pdf, password, positiveIsSpend)
+                : excel is not null ? await Api.PreviewExcel(selected.Id, excel, password, positiveIsSpend, columns)
                 : await Api.PreviewImport(selected.Id, csv!, positiveIsSpend, columns);
             picked = preview.Rows.Where(r => r.Status == "new").Select(r => r.Index).ToHashSet();
             salary = preview.Rows.Where(r => r.SuggestSalary).Select(r => r.Index).ToHashSet();
@@ -582,6 +587,10 @@ else
             if (preview.Problem is null) mapping = new();
         });
     }
+
+    // .xlsx is a zip ("PK"), .xls an OLE file (D0 CF 11 E0).
+    private static bool IsExcel(byte[] b) =>
+        b.Length > 4 && (b[0] == 'P' && b[1] == 'K' || b[0] == 0xD0 && b[1] == 0xCF && b[2] == 0x11 && b[3] == 0xE0);
 
     private static void Toggle(HashSet<int> set, int index, ChangeEventArgs e)
     {

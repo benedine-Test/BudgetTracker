@@ -151,6 +151,9 @@ public class Api(HttpClient http)
     public Task<ImportPreview> PreviewPdf(int id, string pdfBase64, string? password, bool? positiveIsSpend) =>
         Post<ImportPreview>($"api/accounts/{id}/import/preview", new { pdf = pdfBase64, password, positiveIsSpend });
 
+    public Task<ImportPreview> PreviewExcel(int id, string excelBase64, string? password, bool? positiveIsSpend, ColumnMap? columns) =>
+        Post<ImportPreview>($"api/accounts/{id}/import/preview", new { excel = excelBase64, password, positiveIsSpend, columns });
+
     public Task<ImportResult> CommitImport(int id, List<ImportRowIn> add, List<int> link, decimal? statementBalance,
         DateOnly? statementBalanceDate, string? fileName) =>
         Post<ImportResult>($"api/accounts/{id}/import", new { add, link, statementBalance, statementBalanceDate, fileName });

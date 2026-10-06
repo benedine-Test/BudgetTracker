@@ -129,7 +129,8 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
     {
         if (parsed.Problem is not null)
             return new ImportPreview(parsed.Headers, parsed.Columns, positiveIsSpend, [], parsed.SkippedLines, null, null, null, parsed.Problem,
-                NeedsPassword: parsed.Problem is PdfStatementReader.PasswordProblem or PdfStatementReader.WrongPasswordProblem);
+                NeedsPassword: parsed.Problem is PdfStatementReader.PasswordProblem or PdfStatementReader.WrongPasswordProblem
+                    or ExcelStatementReader.PasswordProblem or ExcelStatementReader.WrongPasswordProblem);
 
         var rows = parsed.Rows;
         var from = clock.LocalDateStartToUtc(rows.Min(r => r.Date).AddDays(-StatementMatcher.DaysAfter - 1));
