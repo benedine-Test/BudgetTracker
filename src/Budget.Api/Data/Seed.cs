@@ -1,3 +1,4 @@
+using Budget.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Budget.Api.Data;
@@ -32,6 +33,7 @@ public static class Seed
         ("Salary", Bucket.Income),
         ("Other Income", Bucket.Income),
         ("Refund", Bucket.Income),
+        ("Paid Back", Bucket.Income), // a friend repaying their part of a bill you paid
         ("Transfer", Bucket.Transfer),
     ];
 
@@ -119,6 +121,9 @@ public static class Seed
                 Priority = r.Priority
             }));
         }
+        // Added after the first release, so databases seeded before it don't have it yet.
+        else if (!await db.Categories.AnyAsync(c => c.Name == SharedBills.RepaymentCategory))
+            db.Categories.Add(new Category { Name = SharedBills.RepaymentCategory, Bucket = Bucket.Income });
 
         await db.SaveChangesAsync();
     }

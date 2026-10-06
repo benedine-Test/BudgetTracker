@@ -135,7 +135,21 @@ public class Transaction
     /// <summary>True once the user has confirmed or corrected the category.</summary>
     public bool CategoryConfirmed { get; set; }
 
+    /// <summary>
+    /// A bill paid for others too: the part that was yours. Only this counts toward the budget;
+    /// the rest is owed back until repayments (<see cref="RepaysId"/>) cover it or it's written off.
+    /// Null = all of it was yours.
+    /// </summary>
+    public decimal? MyShare { get; set; }
+    /// <summary>Who owes the rest of a shared bill ("Alex", "Team lunch"). Optional.</summary>
+    public string? SharedWith { get; set; }
+    /// <summary>On money in: the shared bill this pays back.</summary>
+    public int? RepaysId { get; set; }
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>What this entry costs you: your share of a shared bill, else all of it.</summary>
+    public decimal CountedAmount => MyShare ?? Amount;
 }
 
 /// <summary>

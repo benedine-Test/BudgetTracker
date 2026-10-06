@@ -136,6 +136,26 @@ public static class SchemaUpgrade
                     : "CREATE INDEX \"IX_Transactions_ImportBatchId\" ON \"Transactions\" (\"ImportBatchId\");", ct);
             }
 
+            // ---- Shared bills (your share, who owes the rest, repayments) ----
+            if (!await ColumnExistsAsync(conn, "Transactions", "RepaysId", sqlServer, ct))
+            {
+                foreach (var (column, sqlServerType, sqliteType) in new[]
+                {
+                    ("MyShare", "decimal(18,2) NULL", "TEXT NULL"),
+                    ("SharedWith", "nvarchar(100) NULL", "TEXT NULL"),
+                    ("RepaysId", "int NULL", "INTEGER NULL"),
+                })
+                {
+                    if (await ColumnExistsAsync(conn, "Transactions", column, sqlServer, ct)) continue;
+                    await db.Database.ExecuteSqlRawAsync(sqlServer
+                        ? $"ALTER TABLE [Transactions] ADD [{column}] {sqlServerType};"
+                        : $"ALTER TABLE \"Transactions\" ADD COLUMN \"{column}\" {sqliteType};", ct);
+                }
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_Transactions_RepaysId] ON [Transactions] ([RepaysId]);"
+                    : "CREATE INDEX \"IX_Transactions_RepaysId\" ON \"Transactions\" (\"RepaysId\");", ct);
+            }
+
             // ---- Automatic prices and regular contributions on holdings ----
             if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
                 && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))
