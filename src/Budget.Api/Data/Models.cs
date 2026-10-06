@@ -181,7 +181,8 @@ public enum AssetClass
     Crypto = 3,
     Cash = 4,      // fixed deposits, HYSA
     Cpf = 5,       // OA / SA / MA balances
-    Other = 6
+    Other = 6,
+    Policy = 7     // investment-linked insurance (ILP): premiums paid vs the insurer's stated value
 }
 
 public class Holding
@@ -198,4 +199,32 @@ public class Holding
     public DateTime? LastPriceAtUtc { get; set; }
     /// <summary>FX rate Currency → base currency. 1 for SGD holdings.</summary>
     public decimal FxToBase { get; set; } = 1m;
+
+    /// <summary>Fetch the price by <see cref="Symbol"/> (a Yahoo Finance ticker) instead of typing it.</summary>
+    public bool AutoPrice { get; set; }
+    /// <summary>Why the last automatic price fetch failed, shown until one succeeds.</summary>
+    public string? PriceError { get; set; }
+
+    /// <summary>
+    /// When <see cref="Units"/> and <see cref="AverageCost"/> were last entered. Contributions
+    /// matched after this are added on top (see <see cref="ContributionMatch"/>); earlier ones
+    /// are assumed to be in the figures already.
+    /// </summary>
+    public DateTime? FiguresAsOfUtc { get; set; }
+
+    /// <summary>
+    /// Text a bank entry contains when it pays into this holding ("FWD" for a monthly GIRO
+    /// premium). Matching spends count as money put in. Null = no regular contribution.
+    /// </summary>
+    public string? ContributionMatch { get; set; }
+    /// <summary>Only entries of exactly this amount match, when set.</summary>
+    public decimal? ContributionAmount { get; set; }
+    /// <summary>Only entries from this account match, when set.</summary>
+    public int? ContributionAccountId { get; set; }
+
+    /// <summary>
+    /// Units = 1 and a typed-in price means the price is the balance (CPF, cash, an ILP's value):
+    /// entering a new balance takes in every contribution made before it.
+    /// </summary>
+    public bool IsBalance => !AutoPrice && Units == 1;
 }

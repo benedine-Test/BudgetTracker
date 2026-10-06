@@ -22,6 +22,14 @@ builder.Services.AddScoped<Categorizer>();
 builder.Services.AddScoped<BudgetService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<PriceRefresher>();
+builder.Services.AddHttpClient<IQuoteSource, YahooQuoteSource>(c =>
+{
+    c.BaseAddress = new Uri("https://query1.finance.yahoo.com/");
+    c.Timeout = TimeSpan.FromSeconds(10);
+    // Yahoo turns away requests without a browser-like user agent.
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; BudgetTracker/1.0)");
+});
 
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
