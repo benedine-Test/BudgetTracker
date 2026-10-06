@@ -38,6 +38,16 @@ else
             </span>
             on @Fmt.Money(p.TotalCostBase) put in
         </p>
+        @if (p.Holdings.Any(h => h.AutoPrice))
+        {
+            <p class="sub">
+                @(refreshing ? "Updating prices…" : refreshNote)
+                @if (!refreshing)
+                {
+                    <button type="button" class="link" @onclick="() => Refresh(true)">Update now</button>
+                }
+            </p>
+        }
     </section>
 
     <section class="card">
@@ -69,7 +79,7 @@ else
             {
                 <button type="button" class="row" @onclick="() => Edit(h)">
                     <span class="row-main">
-                        @if (IsPriced(h.AssetClass))
+                        @if (IsPriced(h.AssetClass) && !IsBalanceClass(h.AssetClass))
                         {
                             <span class="tx-name">@h.Symbol <span class="muted">@h.Name</span></span>
                         }
@@ -79,11 +89,26 @@ else
                         }
                         <span class="muted">
                             @Fmt.AssetClass(h.AssetClass)@(string.IsNullOrWhiteSpace(h.Platform) ? "" : $" · {h.Platform}")
-                            @if (h.PriceIsStale && IsPriced(h.AssetClass))
+                            @if (h.PriceError is not null)
+                            {
+                                <span class="tag warn">@h.PriceError</span>
+                            }
+                            else if (h.PriceIsStale && !IsBalanceClass(h.AssetClass))
                             {
                                 <span class="tag warn">Price out of date</span>
                             }
                         </span>
+                        @if (h.ContributionMatch is not null)
+                        {
+                            <span class="muted small">
+                                @(h.ContributionAmount is { } amt ? Fmt.Money(amt) + " paid in" : "Paid in") from the bank
+                                @(h.ContributionCount == 0 ? "· none found yet" : $"· {h.ContributionCount} found, last {h.LastContributionAtUtc!.Value.ToOffset(TimeSpan.FromHours(8)).ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture)}")
+                            </span>
+                        }
+                        @if (h.NotInFiguresBase > 0 && !IsBalanceClass(h.AssetClass))
+                        {
+                            <span class="muted small">@Fmt.Money(h.NotInFiguresBase) paid in since you last entered units, counted at cost</span>
+                        }
                     </span>
                     <span class="row-end">
                         <span class="num">@Fmt.Money(h.MarketValueBase)</span>
@@ -103,7 +128,7 @@ else
     <Sheet Title="@(editId is null ? "Add holding" : "Edit holding")" OnClose="() => editing = false">
         <form @onsubmit="Save" @onsubmit:preventDefault>
             <label for="h-class">Type</label>
-            <select id="h-class" @bind="assetClass">
+            <select id="h-class" @bind="assetClass" @bind:after="ClassChanged">
                 @foreach (var c in Classes)
                 {
                     <option value="@c">@Fmt.AssetClass(c)</option>
@@ -117,6 +142,25 @@ else
 
                 <label for="h-balance">Balance (S$)</label>
                 <input id="h-balance" type="number" inputmode="decimal" step="0.01" min="0" @bind="balance" />
+            }
+            else if (IsPolicy)
+            {
+                <label for="h-name">Name</label>
+                <input id="h-name" type="text" placeholder="FWD Invest First Plus" @bind="name" />
+
+                <label for="h-paid">Total paid in so far (S$)</label>
+                <input id="h-paid" type="number" inputmode="decimal" step="0.01" min="0" @bind="paid" />
+                @if (found is { ContributionCount: > 0 } f && f.ContributedBase != paid)
+                {
+                    <p class="hint">
+                        @f.ContributionCount payments found in your bank entries, @Fmt.Money(f.ContributedBase) in total.
+                        <button type="button" class="link" @onclick="() => paid = f.ContributedBase">Use this</button>
+                    </p>
+                }
+
+                <label for="h-value">Value now (S$)</label>
+                <input id="h-value" type="number" inputmode="decimal" step="0.01" min="0" @bind="balance" />
+                <p class="hint">The surrender or fund value in the insurer's app. Prices for these plans aren't public, so update it now and then.</p>
             }
             else
             {
@@ -150,23 +194,64 @@ else
                     </div>
                 </div>
 
+                <label class="check">
+                    <input type="checkbox" @bind="autoPrice" />
+                    Fetch the price automatically
+                </label>
+                @if (autoPrice)
+                {
+                    <p class="hint">Uses the Yahoo Finance ticker: ES3.SI for SGX, VWRA.L for London, BTC-USD for crypto. Exchange rates update too.</p>
+                }
+                else
+                {
+                    <div class="two">
+                        <div>
+                            <label for="h-price">Latest price per unit</label>
+                            <input id="h-price" type="number" inputmode="decimal" step="any" min="0" @bind="lastPrice" />
+                        </div>
+                        @if (currency != "SGD")
+                        {
+                            <div>
+                                <label for="h-fx">1 @currency in S$</label>
+                                <input id="h-fx" type="number" inputmode="decimal" step="any" min="0" @bind="fx" />
+                            </div>
+                        }
+                    </div>
+                }
+            }
+
+            <label class="check">
+                <input type="checkbox" @bind="hasContribution" />
+                Money goes in from my bank regularly
+            </label>
+            @if (hasContribution)
+            {
+                <label for="h-match">The bank entry contains</label>
+                <input id="h-match" type="text" autocorrect="off" placeholder="FWD" @bind="contributionMatch" />
                 <div class="two">
                     <div>
-                        <label for="h-price">Latest price per unit</label>
-                        <input id="h-price" type="number" inputmode="decimal" step="any" min="0" @bind="lastPrice" />
+                        <label for="h-camt">Amount each time (optional)</label>
+                        <input id="h-camt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="300" @bind="contributionAmount" />
                     </div>
-                    @if (currency != "SGD")
-                    {
-                        <div>
-                            <label for="h-fx">1 @currency in S$</label>
-                            <input id="h-fx" type="number" inputmode="decimal" step="any" min="0" @bind="fx" />
-                        </div>
-                    }
+                    <div>
+                        <label for="h-cacc">From (optional)</label>
+                        <select id="h-cacc" @bind="contributionAccountId">
+                            <option value="">Any account</option>
+                            @foreach (var a in accounts)
+                            {
+                                <option value="@a.Id">@a.Name</option>
+                            }
+                        </select>
+                    </div>
                 </div>
+                <p class="hint">
+                    Each matching payment is added to what you've put in@(IsBalance || IsPolicy ? "" : ", at cost until you update the units held").
+                    Payments before today are taken as already in the figures above. They show up once the bank entry is in the app, for example after a statement import.
+                </p>
             }
 
             <label for="h-platform">Where it is held (optional)</label>
-            <input id="h-platform" type="text" placeholder="@(IsBalance ? "DBS, CPF Board" : "IBKR, Tiger, Endowus")" @bind="platform" />
+            <input id="h-platform" type="text" placeholder="@(IsBalance ? "DBS, CPF Board" : IsPolicy ? "FWD" : "IBKR, Tiger, Endowus")" @bind="platform" />
 
             @if (formError is not null)
             {
@@ -184,7 +269,7 @@ else
 }
 
 @code {
-    private static readonly string[] Classes = ["Etf", "Stock", "Bond", "Crypto", "Cash", "Cpf", "Other"];
+    private static readonly string[] Classes = ["Etf", "Stock", "Bond", "Crypto", "Policy", "Cash", "Cpf", "Other"];
     private static readonly string[] Currencies = ["SGD", "USD", "HKD", "GBP", "EUR", "AUD", "JPY", "MYR"];
 
     private PortfolioSummary? p;
@@ -202,15 +287,55 @@ else
     private decimal? lastPrice;
     private decimal? fx;
     private decimal? balance;
+    private decimal? paid;
+    private bool autoPrice = true;
+    private bool hasContribution;
+    private string contributionMatch = "";
+    private decimal? contributionAmount;
+    private int? contributionAccountId;
+    private HoldingValue? found;
+    private List<AccountDto> accounts = [];
+    private bool refreshing;
+    private string? refreshNote;
     private string? formError;
     private bool busy;
     private bool confirmDelete;
 
     /// <summary>CPF and cash are a single balance, not units × price.</summary>
     private bool IsBalance => assetClass is "Cpf" or "Cash";
+    /// <summary>An ILP: what was paid in and what the insurer says it's worth.</summary>
+    private bool IsPolicy => assetClass == "Policy";
     private static bool IsPriced(string assetClass) => assetClass is not ("Cpf" or "Cash");
+    private static bool IsBalanceClass(string assetClass) => assetClass is "Cpf" or "Cash" or "Policy";
+    private static bool FetchesByDefault(string assetClass) => assetClass is "Etf" or "Stock" or "Crypto";
 
-    protected override Task OnInitializedAsync() => Load();
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        if (p is not null) await Refresh(false);
+    }
+
+    /// <summary>Prices are fetched each time the screen opens; the server skips ones fetched in the last few minutes.</summary>
+    private async Task Refresh(bool force)
+    {
+        if (refreshing || p is null || !p.Holdings.Any(h => h.AutoPrice)) return;
+        refreshing = true;
+        StateHasChanged();
+        try
+        {
+            var r = await Api.RefreshPrices(force);
+            refreshNote = r.Failed > 0 ? r.Message : $"Prices as of {DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(8)):h:mm tt}.";
+            if (r.Updated > 0 || r.Failed > 0) p = await Api.Portfolio();
+        }
+        catch (ApiException e)
+        {
+            refreshNote = e.Message;
+        }
+        finally
+        {
+            refreshing = false;
+        }
+    }
 
     private async Task Load()
     {
@@ -245,6 +370,34 @@ else
         fx = h is null || h.FxToBase == 1 ? null : Fmt.Trim(h.FxToBase);
         // A balance is stored as 1 unit whose "price" is the balance.
         balance = h is null ? null : Fmt.Trim(h.Units * (h.LastPrice ?? h.AverageCost));
+        paid = h is null ? null : Fmt.Trim(h.AverageCost);
+        autoPrice = h?.AutoPrice ?? FetchesByDefault(assetClass);
+        hasContribution = h?.ContributionMatch is not null;
+        contributionMatch = h?.ContributionMatch ?? "";
+        contributionAmount = Fmt.Trim(h?.ContributionAmount);
+        contributionAccountId = h?.ContributionAccountId;
+        found = h;
+        _ = LoadAccounts();
+    }
+
+    /// <summary>A new holding fetches its price if it's the kind that has a public one.</summary>
+    private void ClassChanged()
+    {
+        if (editId is null) autoPrice = FetchesByDefault(assetClass);
+    }
+
+    private async Task LoadAccounts()
+    {
+        if (accounts.Count > 0) return;
+        try
+        {
+            accounts = (await Api.Accounts()).Accounts;
+            StateHasChanged();
+        }
+        catch (ApiException)
+        {
+            // The list is optional: without it, payments from any account match.
+        }
     }
 
     private async Task Save()
@@ -253,17 +406,26 @@ else
         formError = Validate();
         if (formError is not null) return;
 
+        var match = hasContribution ? contributionMatch.Trim() : "";
+        var camt = hasContribution ? contributionAmount : null;
+        var cacc = hasContribution ? contributionAccountId : null;
         HoldingSave body;
         if (IsBalance)
         {
             body = new HoldingSave(assetClass == "Cpf" ? "CPF" : "CASH", name.Trim(), assetClass, Clean(platform),
-                1, balance!.Value, "SGD", balance.Value, 1);
+                1, balance!.Value, "SGD", balance.Value, 1, false, match, camt, cacc);
+        }
+        else if (IsPolicy)
+        {
+            body = new HoldingSave("ILP", name.Trim(), assetClass, Clean(platform),
+                1, paid!.Value, "SGD", balance!.Value, 1, false, match, camt, cacc);
         }
         else
         {
+            var fetch = autoPrice;
             body = new HoldingSave(symbol.Trim(), string.IsNullOrWhiteSpace(name) ? symbol.Trim() : name.Trim(),
                 assetClass, Clean(platform), units!.Value, averageCost!.Value, currency,
-                lastPrice, currency == "SGD" ? 1 : fx!.Value);
+                fetch ? null : lastPrice, currency == "SGD" ? 1 : fetch ? null : fx!.Value, fetch, match, camt, cacc);
         }
 
         busy = true;
@@ -273,6 +435,7 @@ else
             Toast.Show("Saved.");
             editing = false;
             await Load();
+            await Refresh(false);
         }
         catch (ApiException e)
         {
@@ -286,6 +449,12 @@ else
 
     private string? Validate()
     {
+        if (hasContribution)
+        {
+            if (contributionMatch.Trim().Length < 3) return "Enter at least 3 letters of the bank entry, such as FWD.";
+            if (contributionAmount is <= 0) return "The amount must be more than zero, or left empty.";
+        }
+
         if (IsBalance)
         {
             if (string.IsNullOrWhiteSpace(name)) return "Give it a name, such as CPF Ordinary Account.";
@@ -293,9 +462,18 @@ else
             return null;
         }
 
+        if (IsPolicy)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Give it a name, such as FWD Invest First Plus.";
+            if (paid is not >= 0) return "Enter how much you've paid in so far.";
+            if (balance is not >= 0) return "Enter what it's worth now.";
+            return null;
+        }
+
         if (string.IsNullOrWhiteSpace(symbol)) return "Enter the ticker, such as ES3.SI.";
         if (units is not >= 0) return "Enter how many units you hold.";
         if (averageCost is not >= 0) return "Enter the average cost per unit.";
+        if (autoPrice) return null;
         if (lastPrice is < 0) return "The latest price can't be negative.";
         if (currency != "SGD" && fx is not > 0) return $"Enter what 1 {currency} is worth in S$.";
         return null;

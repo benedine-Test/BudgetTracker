@@ -125,6 +125,36 @@ public static class SchemaUpgrade
                     ? "CREATE INDEX [IX_Transactions_ImportBatchId] ON [Transactions] ([ImportBatchId]);"
                     : "CREATE INDEX \"IX_Transactions_ImportBatchId\" ON \"Transactions\" (\"ImportBatchId\");", ct);
             }
+
+            // ---- Automatic prices and regular contributions on holdings ----
+            if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
+                && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))
+            {
+                foreach (var (column, sqlServerType, sqliteType) in new[]
+                {
+                    ("AutoPrice", "bit NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+                    ("PriceError", "nvarchar(300) NULL", "TEXT NULL"),
+                    ("FiguresAsOfUtc", "datetime2 NULL", "TEXT NULL"),
+                    ("ContributionMatch", "nvarchar(100) NULL", "TEXT NULL"),
+                    ("ContributionAmount", "decimal(18,2) NULL", "TEXT NULL"),
+                    ("ContributionAccountId", "int NULL", "INTEGER NULL"),
+                })
+                {
+                    if (await ColumnExistsAsync(conn, "Holdings", column, sqlServer, ct)) continue;
+                    await db.Database.ExecuteSqlRawAsync(sqlServer
+                        ? $"ALTER TABLE [Holdings] ADD [{column}] {sqlServerType};"
+                        : $"ALTER TABLE \"Holdings\" ADD COLUMN \"{column}\" {sqliteType};", ct);
+                }
+
+                // Shares, ETFs and crypto already carry a ticker, so they start fetching their price.
+                // Existing figures are taken as up to date, so no past payment is counted twice.
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "UPDATE [Holdings] SET [AutoPrice] = 1 WHERE [AssetClass] IN (0, 1, 3);"
+                    : "UPDATE \"Holdings\" SET \"AutoPrice\" = 1 WHERE \"AssetClass\" IN (0, 1, 3);", ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "UPDATE [Holdings] SET [FiguresAsOfUtc] = SYSUTCDATETIME();"
+                    : "UPDATE \"Holdings\" SET \"FiguresAsOfUtc\" = strftime('%Y-%m-%d %H:%M:%f', 'now');", ct);
+            }
         }
         finally
         {

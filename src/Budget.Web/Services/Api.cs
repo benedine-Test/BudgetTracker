@@ -48,7 +48,11 @@ public record SettingsDto(int PayDay, decimal NeedsPct, decimal WantsPct, decima
 
 public record HoldingValue(int Id, string Symbol, string Name, string AssetClass, string? Platform,
     decimal Units, decimal AverageCost, string Currency, decimal FxToBase, decimal? LastPrice, DateTime? LastPriceAtUtc,
-    decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct, bool PriceIsStale);
+    decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct, bool PriceIsStale,
+    bool AutoPrice, string? PriceError, string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
+    int ContributionCount, decimal ContributedBase, DateTimeOffset? LastContributionAtUtc, decimal NotInFiguresBase);
+
+public record PriceRefreshResult(int Updated, int Failed, int Skipped, string Message);
 
 public record AllocationSlice(string AssetClass, decimal ValueBase, decimal Percent);
 
@@ -58,7 +62,8 @@ public record PortfolioSummary(decimal TotalCostBase, decimal TotalValueBase, de
 public record CategoriseResult(TransactionDto Transaction, string? LearnedPattern, int ReFiled);
 
 public record HoldingSave(string Symbol, string Name, string AssetClass, string? Platform,
-    decimal Units, decimal AverageCost, string Currency, decimal? LastPrice, decimal FxToBase);
+    decimal Units, decimal AverageCost, string Currency, decimal? LastPrice, decimal? FxToBase,
+    bool AutoPrice, string ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId);
 
 /// <summary>A problem worth showing to the person using the app, in plain words.</summary>
 public class ApiException(string message) : Exception(message);
@@ -179,6 +184,10 @@ public class Api(HttpClient http)
         id is null ? Send(HttpMethod.Post, "api/holdings", h) : Send(HttpMethod.Put, $"api/holdings/{id}", h);
 
     public Task DeleteHolding(int id) => Send(HttpMethod.Delete, $"api/holdings/{id}");
+
+    /// <summary>Fetches prices that are due (all of them when forced) and exchange rates.</summary>
+    public Task<PriceRefreshResult> RefreshPrices(bool force) =>
+        Post<PriceRefreshResult>("api/holdings/refresh" + (force ? "?force=true" : ""), new { });
 
     /// <summary>Checks a key before it is saved on the phone.</summary>
     public async Task<bool> KeyWorks(string key)

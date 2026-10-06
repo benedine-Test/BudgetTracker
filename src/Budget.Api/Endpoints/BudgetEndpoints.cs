@@ -9,7 +9,8 @@ public record SettingsUpdate(int? PayDay, decimal? NeedsPct, decimal? WantsPct, 
 public record CategoryUpsert(string Name, Bucket Bucket, bool? IsArchived);
 public record RuleCreate(string Pattern, int CategoryId, int? Priority);
 public record HoldingUpsert(string Symbol, string Name, AssetClass AssetClass, string? Platform,
-    decimal Units, decimal AverageCost, string? Currency, decimal? LastPrice, decimal? FxToBase);
+    decimal Units, decimal AverageCost, string? Currency, decimal? LastPrice, decimal? FxToBase,
+    bool? AutoPrice = null, string? ContributionMatch = null, decimal? ContributionAmount = null, int? ContributionAccountId = null);
 public record PriceUpdate(decimal Price, decimal? FxToBase);
 
 public static class BudgetEndpoints
@@ -108,13 +109,21 @@ public static class BudgetEndpoints
             await db.MerchantRules.Where(r => r.Id == id).ExecuteDeleteAsync(ct) == 0 ? Results.NotFound() : Results.NoContent());
 
         // ---- Investments ----
-        api.MapGet("/holdings", async (BudgetDbContext db, Clock clock, CancellationToken ct) =>
-            Portfolio.Summarise(await db.Holdings.AsNoTracking().ToListAsync(ct), clock.UtcNow));
+        api.MapGet("/holdings", async (BudgetDbContext db, BudgetService budgets, Clock clock, CancellationToken ct) =>
+        {
+            var holdings = await db.Holdings.AsNoTracking().ToListAsync(ct);
+            var baseCcy = (await budgets.GetSettingsAsync(ct)).BaseCurrency;
+            return Portfolio.Summarise(holdings, await ContributionsAsync(db, holdings, baseCcy, ct), clock.UtcNow);
+        });
+
+        // Fetches prices for holdings set to AutoPrice and exchange rates for foreign ones.
+        // The Invest screen calls this each time it opens; recent prices are skipped unless force=true.
+        api.MapPost("/holdings/refresh", async (bool? force, PriceRefresher refresher, CancellationToken ct) =>
+            Results.Ok(await refresher.RefreshAsync(force ?? false, ct)));
 
         api.MapPost("/holdings", async (HoldingUpsert body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(body.Symbol)) return Results.BadRequest(new { message = "Symbol is required." });
-            if (body.Units < 0 || body.AverageCost < 0) return Results.BadRequest(new { message = "Units and cost can't be negative." });
+            if (Invalid(body) is { } problem) return Results.BadRequest(new { message = problem });
             var h = new Holding();
             Apply(h, body, clock);
             db.Holdings.Add(h);
@@ -126,6 +135,7 @@ public static class BudgetEndpoints
         {
             var h = await db.Holdings.FindAsync([id], ct);
             if (h is null) return Results.NotFound();
+            if (Invalid(body) is { } problem) return Results.BadRequest(new { message = problem });
             Apply(h, body, clock);
             await db.SaveChangesAsync(ct);
             return Results.Ok(h);
@@ -161,21 +171,68 @@ public static class BudgetEndpoints
         });
     }
 
+    private static string? Invalid(HoldingUpsert b)
+    {
+        if (string.IsNullOrWhiteSpace(b.Symbol)) return "Symbol is required.";
+        if (b.Units < 0 || b.AverageCost < 0) return "Units and cost can't be negative.";
+        if (b.ContributionAmount is <= 0) return "The monthly amount must be more than zero, or left empty.";
+        if (b.ContributionMatch is { Length: > 100 }) return "Keep the bank text under 100 characters.";
+        if (b.ContributionMatch is { } m && !string.IsNullOrWhiteSpace(m) && m.Trim().Length < 3)
+            return "Use at least 3 letters of the bank text, such as FWD, so other payments don't match.";
+        return null;
+    }
+
     private static void Apply(Holding h, HoldingUpsert b, Clock clock)
     {
+        var now = clock.UtcNow;
         h.Symbol = b.Symbol.Trim().ToUpperInvariant();
         h.Name = b.Name?.Trim() ?? h.Symbol;
         h.AssetClass = b.AssetClass;
         h.Platform = b.Platform;
+        // New figures take in every contribution made so far; only later ones are added on top.
+        if (h.Id == 0 || h.Units != b.Units || h.AverageCost != b.AverageCost || h.FiguresAsOfUtc is null)
+            h.FiguresAsOfUtc = now;
         h.Units = b.Units;
         h.AverageCost = b.AverageCost;
         h.Currency = string.IsNullOrWhiteSpace(b.Currency) ? "SGD" : b.Currency.ToUpperInvariant();
         if (b.FxToBase is decimal fx && fx > 0) h.FxToBase = fx;
-        if (b.LastPrice is decimal p)
+        // Only a changed price counts as a new one, so saving a name doesn't make an old balance look current.
+        if (b.LastPrice is decimal p && (p != h.LastPrice || h.LastPriceAtUtc is null))
         {
             h.LastPrice = p;
-            h.LastPriceAtUtc = clock.UtcNow;
+            h.LastPriceAtUtc = now;
         }
+        if (b.AutoPrice is bool auto)
+        {
+            if (auto != h.AutoPrice) h.PriceError = null;
+            h.AutoPrice = auto;
+        }
+        if (b.ContributionMatch is not null)
+        {
+            var match = b.ContributionMatch.Trim();
+            h.ContributionMatch = match.Length == 0 ? null : match;
+            h.ContributionAmount = match.Length == 0 ? null : b.ContributionAmount;
+            h.ContributionAccountId = match.Length == 0 ? null : b.ContributionAccountId;
+        }
+    }
+
+    /// <summary>Bank entries that paid into a holding with a contribution rule (see Portfolio.MatchContributions).</summary>
+    public static async Task<IReadOnlyList<Contribution>> ContributionsAsync(
+        BudgetDbContext db, List<Holding> holdings, string baseCurrency, CancellationToken ct)
+    {
+        var texts = holdings.Where(h => !string.IsNullOrWhiteSpace(h.ContributionMatch))
+            .Select(h => Portfolio.Normalise(h.ContributionMatch!)).Distinct().ToList();
+        if (texts.Count == 0) return [];
+
+        // A rough filter in SQL on the first word of each match; the exact rule runs after loading.
+        var candidates = new Dictionary<int, Transaction>();
+        foreach (var word in texts.Select(t => t.Split(' ')[0]).Distinct())
+        {
+            foreach (var t in await db.Transactions.AsNoTracking()
+                         .Where(t => !t.IsIncome && t.Merchant.ToUpper().Contains(word)).ToListAsync(ct))
+                candidates[t.Id] = t;
+        }
+        return Portfolio.MatchContributions(holdings, candidates.Values.OrderBy(t => t.OccurredAtUtc), baseCurrency);
     }
 
     // Also neutralises spreadsheet formula injection (=, +, -, @) since merchant text comes from outside.

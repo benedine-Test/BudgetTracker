@@ -63,6 +63,7 @@ public static class Fmt
         "Bond" => "Bond / T-bill",
         "Cash" => "Cash / deposit",
         "Cpf" => "CPF",
+        "Policy" => "Insurance plan (ILP)",
         _ => value
     };
 }

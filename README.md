@@ -24,7 +24,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Budget** — what's left from this pay, the three buckets with progress and a daily allowance, where the money went, and earlier pay periods.
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
-- **Invest** — total value, gain/loss, mix by type, holdings. CPF and cash are entered as a single balance.
+- **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
@@ -122,8 +122,9 @@ Things to check in your first week:
 | GET/POST/PUT | `/api/categories[/{id}]` | Move a category between Needs / Wants / Savings / Income / Transfer |
 | GET/POST/DELETE | `/api/rules[/{id}]` | Merchant pattern → category |
 | GET | `/api/holdings` | Portfolio: cost, value, P/L, allocation, stale-price flags |
-| POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase}` |
+| POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase, autoPrice?, contributionMatch?, contributionAmount?, contributionAccountId?}` |
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
+| POST | `/api/holdings/refresh?force=` | Fetch due prices (`autoPrice` holdings) and exchange rates from Yahoo Finance |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
 | GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
@@ -135,7 +136,11 @@ Things to check in your first week:
 
 **Budget buckets.** Savings-bucket categories (Investments, Emergency Fund, Savings Goals) count as *contributions*, so you can see progress toward the 20%. Transfer and Income categories never count as spend.
 
-**Investments.** Enter CPF OA/SA/MA as `assetClass: "Cpf"` with `units: 1` and `averageCost` = balance. Foreign holdings take `fxToBase` (e.g. USD→SGD 1.30). Prices are manual for now.
+**Investments.** Enter CPF OA/SA/MA as `assetClass: "Cpf"` with `units: 1` and `averageCost` = balance. Foreign holdings take `fxToBase` (e.g. USD→SGD 1.30).
+
+- **Automatic prices.** With `autoPrice: true` the symbol is looked up on Yahoo Finance (ES3.SI, VWRA.L, AAPL, BTC-USD), and every foreign holding's exchange rate is refreshed too. Yahoo's endpoint is unofficial: if it fails, the last price stays and the reason shows on the holding. Prices fetched in the last 15 minutes are skipped unless forced.
+- **Insurance plans (ILPs).** `assetClass: "Policy"`, `units: 1`, `averageCost` = total paid in, `lastPrice` = the value the insurer shows. There is no public price, so the value is updated by hand.
+- **Regular contributions.** `contributionMatch` is text the bank entry contains (e.g. `FWD`), optionally narrowed by `contributionAmount` and `contributionAccountId`. Matching spends after the holding's units/cost were last entered are added on top, at cost, until the figures are updated. A typed-in balance (CPF, an ILP's value) takes in every payment made before it. The bank entry has to be in the app first, usually from a statement import.
 
 ## Deploying
 

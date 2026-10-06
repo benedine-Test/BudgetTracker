@@ -67,6 +67,10 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(h => h.AverageCost).HasPrecision(18, 6);
             e.Property(h => h.LastPrice).HasPrecision(18, 6);
             e.Property(h => h.FxToBase).HasPrecision(18, 6);
+            e.Property(h => h.PriceError).HasMaxLength(300);
+            e.Property(h => h.ContributionMatch).HasMaxLength(100);
+            e.Property(h => h.ContributionAmount).HasPrecision(18, 2);
+            e.Ignore(h => h.IsBalance);
         });
     }
 }
