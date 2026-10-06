@@ -152,9 +152,9 @@ else
     <Sheet Title="@($"Import into {selected.Name}")" OnClose="CloseSheets">
         @if (preview is null || preview.Problem is not null)
         {
-            <p class="muted">In your bank's app or website, download the <strong>transaction history as CSV</strong> for the dates you want to check, then pick the file here. Excel files: save as CSV first. PDF statements can't be read.</p>
-            <label for="imp-file">Statement file (.csv)</label>
-            <InputFile id="imp-file" accept=".csv,text/csv,.txt" OnChange="FilePicked" disabled="@busy" />
+            <p class="muted">Pick the <strong>PDF statement</strong> your bank emails or lets you download, or a <strong>CSV</strong> transaction history if your bank offers one (more reliable). Excel files: save as CSV first. Scanned or photographed statements can't be read.</p>
+            <label for="imp-file">Statement file (.pdf or .csv)</label>
+            <InputFile id="imp-file" accept=".pdf,application/pdf,.csv,text/csv,.txt" OnChange="FilePicked" disabled="@busy" />
             @if (busy)
             {
                 <p class="hint">Reading…</p>
@@ -163,6 +163,17 @@ else
             @if (preview?.Problem is { } problem)
             {
                 <p class="field-error" role="alert">@problem</p>
+                @if (preview.NeedsPassword)
+                {
+                    <form @onsubmit="() => RunPreview(null)" @onsubmit:preventDefault>
+                        <label for="imp-pw">PDF password</label>
+                        <div class="inline">
+                            <input id="imp-pw" type="password" autocomplete="off" @bind="pdfPassword" />
+                            <button type="submit" class="btn" disabled="@busy">Open</button>
+                        </div>
+                        <p class="hint">Only used to open this file. It isn't saved.</p>
+                    </form>
+                }
                 @if (preview.Headers.Count > 0)
                 {
                     <p class="hint">Point to the right columns and try again:</p>
@@ -192,6 +203,14 @@ else
                 <strong>@preview.Rows.Count lines.</strong>
                 @(preview.Rows.Count - missing) already in the app, <strong>@missing missing</strong>.
             </p>
+            @if (preview.Warning is { } warning)
+            {
+                <p class="tag warn">@warning</p>
+            }
+            @if (pdf is not null)
+            {
+                <p class="hint">Read from a PDF — check the dates, amounts and + / − look right before adding.</p>
+            }
             @if (preview.Columns.Amount is not null && preview.Columns.Debit is null && preview.Columns.Credit is null && preview.Columns.Direction is null)
             {
                 <p class="hint">
@@ -269,7 +288,7 @@ else
 }
 
 @code {
-    private const long MaxFile = 2 * 1024 * 1024;
+    private const long MaxFile = 4 * 1024 * 1024;
     private static readonly (string Key, string Label)[] MapFields =
     [
         ("date", "Date"), ("description", "Description"), ("debit", "Money out"),
@@ -294,6 +313,8 @@ else
 
     private bool importing;
     private string? csv;
+    private string? pdf;            // base64, kept so a password or "swap" can re-read it
+    private string? pdfPassword;
     private ImportPreview? preview;
     private bool? positiveIsSpend;
     private Dictionary<string, string?> mapping = new();
@@ -449,6 +470,8 @@ else
         importing = true;
         preview = null;
         csv = null;
+        pdf = null;
+        pdfPassword = null;
         positiveIsSpend = null;
         mapping = new();
         showMatched = false;
@@ -466,8 +489,13 @@ else
         try
         {
             await using var stream = e.File.OpenReadStream(MaxFile);
-            using var reader = new StreamReader(stream);
-            csv = await reader.ReadToEndAsync();
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            var bytes = buffer.ToArray();
+            var isPdf = bytes.Length > 4 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
+            pdf = isPdf ? Convert.ToBase64String(bytes) : null;
+            csv = isPdf ? null : new StreamReader(new MemoryStream(bytes)).ReadToEnd();
+            pdfPassword = null;
         }
         catch (IOException)
         {
@@ -483,7 +511,7 @@ else
 
     private async Task RunPreview(bool? flip)
     {
-        if (selected is null || csv is null) return;
+        if (selected is null || (csv is null && pdf is null)) return;
         if (flip is not null) positiveIsSpend = flip;
         ColumnMap? columns = mapping.Values.Any(v => v is not null)
             ? new ColumnMap(mapping.GetValueOrDefault("date"),
@@ -494,7 +522,9 @@ else
 
         await Run(async () =>
         {
-            preview = await Api.PreviewImport(selected.Id, csv, positiveIsSpend, columns);
+            preview = pdf is not null
+                ? await Api.PreviewPdf(selected.Id, pdf, string.IsNullOrEmpty(pdfPassword) ? null : pdfPassword, positiveIsSpend)
+                : await Api.PreviewImport(selected.Id, csv!, positiveIsSpend, columns);
             picked = preview.Rows.Where(r => r.Status == "new").Select(r => r.Index).ToHashSet();
             salary = preview.Rows.Where(r => r.SuggestSalary).Select(r => r.Index).ToHashSet();
             positiveIsSpend = preview.PositiveIsSpend;

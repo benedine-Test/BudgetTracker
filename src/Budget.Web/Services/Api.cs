@@ -33,7 +33,7 @@ public record ImportPreviewRow(int Index, DateOnly Date, string Description, dec
 
 public record ImportPreview(List<string> Headers, ColumnMap Columns, bool PositiveIsSpend, List<ImportPreviewRow> Rows,
     int SkippedLines, decimal? StatementBalance, DateOnly? StatementBalanceDate, decimal? AppBalanceThatDayAfterImport,
-    string? Problem);
+    string? Problem, string? Warning, bool NeedsPassword);
 
 public record ImportRowIn(DateOnly Date, string Description, decimal Amount, bool IsCredit, bool IsSalary);
 
@@ -137,6 +137,9 @@ public class Api(HttpClient http)
 
     public Task<ImportPreview> PreviewImport(int id, string csv, bool? positiveIsSpend, ColumnMap? columns) =>
         Post<ImportPreview>($"api/accounts/{id}/import/preview", new { csv, positiveIsSpend, columns });
+
+    public Task<ImportPreview> PreviewPdf(int id, string pdfBase64, string? password, bool? positiveIsSpend) =>
+        Post<ImportPreview>($"api/accounts/{id}/import/preview", new { pdf = pdfBase64, password, positiveIsSpend });
 
     public Task<ImportResult> CommitImport(int id, List<ImportRowIn> add, List<int> link, decimal? statementBalance, DateOnly? statementBalanceDate) =>
         Post<ImportResult>($"api/accounts/{id}/import", new { add, link, statementBalance, statementBalanceDate });

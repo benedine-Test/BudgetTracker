@@ -10,10 +10,11 @@ public record AccountUpdate(string? Name, AccountKind? Kind, string? CardNames, 
 public record BalanceSet(decimal Balance, string? AsOf);
 
 /// <summary>
-/// Csv is the file's text. PositiveIsSpend overrides the default for a single signed amount
-/// column (true for cards, false for bank accounts). Columns overrides detection by heading name.
+/// Send either Csv (the file's text) or Pdf (the file, base64) with its Password if it has one.
+/// PositiveIsSpend overrides the default for amounts with no in/out marking (CSV: true for cards,
+/// false for bank accounts; PDF: true). Columns overrides CSV column detection by heading name.
 /// </summary>
-public record ImportPreviewRequest(string Csv, bool? PositiveIsSpend, ColumnMap? Columns);
+public record ImportPreviewRequest(string? Csv, bool? PositiveIsSpend, ColumnMap? Columns, string? Pdf = null, string? Password = null);
 
 /// <summary>
 /// Add = statement lines to create. Link = existing entries the statement confirmed, filed under
@@ -103,13 +104,26 @@ public static class AccountEndpoints
         {
             var a = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (a is null) return Results.NotFound();
+            if (!string.IsNullOrWhiteSpace(body.Pdf))
+            {
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(body.Pdf); }
+                catch (FormatException) { return Results.BadRequest(new { message = "That PDF didn't arrive intact. Try again." }); }
+                if (bytes.Length > PdfStatementReader.MaxBytes)
+                    return Results.BadRequest(new { message = "That PDF is too big. Statements are usually well under 4 MB — is it the right file?" });
+
+                var spend = body.PositiveIsSpend ?? true;
+                return Results.Ok(await svc.PreviewAsync(a, PdfStatementReader.Read(bytes, body.Password, spend), spend, ct));
+            }
+
             if (string.IsNullOrWhiteSpace(body.Csv)) return Results.BadRequest(new { message = "The file is empty." });
             if (body.Csv.Length > StatementParser.MaxBytes)
                 return Results.BadRequest(new { message = "That file is too big. Download a shorter date range (a few months at a time)." });
 
             var positiveIsSpend = body.PositiveIsSpend ?? a.Kind == AccountKind.CreditCard;
             var parsed = StatementParser.Parse(body.Csv, positiveIsSpend, body.Columns);
-            return Results.Ok(await svc.PreviewAsync(a, parsed, positiveIsSpend, ct));
+            // In a CSV, a card's balance is shown the same way round as its amounts, so "swap" flips both.
+            return Results.Ok(await svc.PreviewAsync(a, parsed, positiveIsSpend, ct, positiveBalanceIsOwed: positiveIsSpend));
         });
 
         // Step 2: add the lines the person ticked.

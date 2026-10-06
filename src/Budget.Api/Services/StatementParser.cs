@@ -27,7 +27,11 @@ public record ParsedStatement(
     int SkippedLines,
     decimal? ClosingBalance,
     DateOnly? ClosingDate,
-    string? Problem);
+    string? Problem)
+{
+    /// <summary>Read, but worth a second look (e.g. lines that don't add up with the running balance).</summary>
+    public string? Warning { get; init; }
+}
 
 /// <summary>
 /// Reads the CSV "transaction history" download most banks offer (DBS/POSB, OCBC, UOB, Citi,

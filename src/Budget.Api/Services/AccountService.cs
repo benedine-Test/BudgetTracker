@@ -21,7 +21,8 @@ public record ImportPreview(
     IReadOnlyList<string> Headers, ColumnMap Columns, bool PositiveIsSpend,
     IReadOnlyList<ImportPreviewRow> Rows, int SkippedLines,
     decimal? StatementBalance, DateOnly? StatementBalanceDate,
-    decimal? AppBalanceThatDayAfterImport, string? Problem);
+    decimal? AppBalanceThatDayAfterImport, string? Problem,
+    string? Warning = null, bool NeedsPassword = false);
 
 public record ImportRowIn(DateOnly Date, string Description, decimal Amount, bool IsCredit, bool IsSalary);
 
@@ -116,10 +117,13 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
 
     // ---- Statement import ----
 
-    public async Task<ImportPreview> PreviewAsync(Account account, ParsedStatement parsed, bool positiveIsSpend, CancellationToken ct = default)
+    /// <param name="positiveBalanceIsOwed">How to read the statement's balance; defaults to "it's a card".</param>
+    public async Task<ImportPreview> PreviewAsync(Account account, ParsedStatement parsed, bool positiveIsSpend,
+        CancellationToken ct = default, bool? positiveBalanceIsOwed = null)
     {
         if (parsed.Problem is not null)
-            return new ImportPreview(parsed.Headers, parsed.Columns, positiveIsSpend, [], parsed.SkippedLines, null, null, null, parsed.Problem);
+            return new ImportPreview(parsed.Headers, parsed.Columns, positiveIsSpend, [], parsed.SkippedLines, null, null, null, parsed.Problem,
+                NeedsPassword: parsed.Problem is PdfStatementReader.PasswordProblem or PdfStatementReader.WrongPasswordProblem);
 
         var rows = parsed.Rows;
         var from = clock.LocalDateStartToUtc(rows.Min(r => r.Date).AddDays(-StatementMatcher.DaysAfter - 1));
@@ -178,9 +182,11 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             appThen = AccountMath.BalanceAt(account.AnchorBalance, account.BalanceAsOfUtc, flows, EndOfDayUtc(closeDay));
         }
 
-        decimal? statementBalance = parsed.ClosingBalance is { } cb ? AccountMath.FromStatement(cb, positiveIsSpend) : null;
+        decimal? statementBalance = parsed.ClosingBalance is { } cb
+            ? AccountMath.FromStatement(cb, positiveBalanceIsOwed ?? account.Kind == AccountKind.CreditCard)
+            : null;
         return new ImportPreview(parsed.Headers, parsed.Columns, positiveIsSpend, preview, parsed.SkippedLines,
-            statementBalance, parsed.ClosingDate, appThen, null);
+            statementBalance, parsed.ClosingDate, appThen, null, parsed.Warning);
     }
 
     public async Task<ImportResult> CommitAsync(Account account, IReadOnlyList<ImportRowIn> add, IReadOnlyList<int> link,

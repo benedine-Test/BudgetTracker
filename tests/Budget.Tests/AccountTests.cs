@@ -352,6 +352,16 @@ public sealed class StatementImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Pdf_balance_of_a_bank_account_stays_positive()
+    {
+        var a = await AddAccountAsync(0m, 1);
+        var parsed = new ParsedStatement([], new ColumnMap(), [new StatementRow(1, new DateOnly(2026, 10, 3), "SHOP", 10m, false, 990m)],
+            0, 990m, new DateOnly(2026, 10, 3), null);
+        var preview = await _accounts.PreviewAsync(a, parsed, positiveIsSpend: true);
+        Assert.Equal(990m, preview.StatementBalance);
+    }
+
+    [Fact]
     public async Task Unknown_money_in_is_other_income_not_left_to_sort()
     {
         var a = await AddAccountAsync(0m, 1);
