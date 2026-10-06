@@ -158,7 +158,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
                 continue;
             }
 
-            var category = await GuessCategoryAsync(r, ct);
+            var (category, partner) = await GuessCategoryAsync(r, account, ct);
             var salary = r.IsCredit && (StatementMatcher.LooksLikeSalary(r.Description) ||
                                         (category is int c && categories[c] == "Salary"));
             // Salary entered by hand from a payslip can differ by a few cents from what the bank paid,
@@ -170,7 +170,9 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
                     $"Salary {TransactionService.Money(nearSalary.Amount, nearSalary.Currency)} already recorded on {clock.ToLocalDate(nearSalary.OccurredAtUtc):d MMM}",
                     false, "Salary")
                 : new ImportPreviewRow(i, r.Date, r.Description, r.Amount, r.IsCredit, r.Balance, "new", null, null,
-                    salary, salary ? "Salary" : category is int cc ? categories[cc] : null));
+                    salary && partner is null,
+                    partner is not null ? $"Transfer {(r.IsCredit ? "from" : "to")} {partner.Account?.Name}"
+                    : salary ? "Salary" : category is int cc ? categories[cc] : null));
         }
 
         // What the app will say the balance was on the statement's last day, once the missing rows are in.
@@ -213,6 +215,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
 
         var linked = 0;
         var linkedIds = new List<int>();
+        var recategorised = new List<string>();
         if (link.Count > 0)
         {
             var toLink = await db.Transactions.Where(t => link.Contains(t.Id)).ToListAsync(ct);
@@ -249,6 +252,13 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             }
 
             var row = new StatementRow(0, r.Date, description, r.Amount, r.IsCredit, null);
+            var (categoryId, partner) = await GuessCategoryAsync(row, account, ct);
+            // The other side of a card bill payment was filed before this one arrived: it's a transfer too.
+            if (partner is not null && !partner.CategoryConfirmed && partner.CategoryId != categoryId)
+            {
+                recategorised.Add($"{partner.Id}:{partner.CategoryId}");
+                partner.CategoryId = categoryId;
+            }
             var tx = new Transaction
             {
                 OccurredAtUtc = when,
@@ -259,7 +269,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
                 Source = TransactionSource.StatementImport,
                 AccountId = account.Id,
                 ImportBatchId = batch.Id,
-                CategoryId = await GuessCategoryAsync(row, ct),
+                CategoryId = categoryId,
                 Notes = "From statement"
             };
             db.Transactions.Add(tx);
@@ -280,6 +290,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         }
         batch.Added = added;
         batch.LinkedIds = linkedIds.Count == 0 ? null : string.Join(',', linkedIds);
+        batch.Recategorised = recategorised.Count == 0 ? null : string.Join(',', recategorised);
         await db.SaveChangesAsync(ct);
 
         var balance = await BalanceAsync(tracked, ct);
@@ -332,6 +343,15 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             }
         }
 
+        // Card bill payments on the other account go back to the category they had.
+        foreach (var pair in (batch.Recategorised ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split(':');
+            var other = await db.Transactions.FirstOrDefaultAsync(t => t.Id == int.Parse(parts[0]), ct);
+            if (other is null || other.CategoryConfirmed) continue; // deleted, or sorted by hand since
+            other.CategoryId = int.TryParse(parts[1], out var prev) ? prev : null;
+        }
+
         var tracked = await db.Accounts.SingleAsync(a => a.Id == account.Id, ct);
         var keptManualBalance = false;
         if (batch.ResetBalance)
@@ -358,17 +378,48 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
     /// Category for a statement line. Card bill payments are Transfers (your own money moving);
     /// money in only takes an income or transfer category (else Other Income) so a refund isn't filed as shopping.
     /// </summary>
-    private async Task<int?> GuessCategoryAsync(StatementRow r, CancellationToken ct)
+    private async Task<(int? CategoryId, Transaction? Partner)> GuessCategoryAsync(StatementRow r, Account account, CancellationToken ct)
     {
-        if (StatementMatcher.LooksLikeCardPayment(r.Description))
-            return (await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Name == "Transfer", ct))?.Id;
+        var partner = await FindCardPaymentPartnerAsync(r, account, ct);
+        if (partner is not null || StatementMatcher.LooksLikeCardPayment(r.Description))
+            return ((await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Name == "Transfer", ct))?.Id, partner);
 
         var match = await categorizer.MatchAsync(r.Description, ct);
-        if (!r.IsCredit) return match;
+        if (!r.IsCredit) return (match, null);
         if (match is int id && await db.Categories.AnyAsync(c => c.Id == id && (c.Bucket == Bucket.Income || c.Bucket == Bucket.Transfer), ct))
-            return id;
+            return (id, null);
         // Money in can't be sorted on the Spending screen, so it shouldn't wait there as "needs a category".
-        return (await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Name == "Other Income", ct))?.Id;
+        return ((await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Name == "Other Income", ct))?.Id, null);
+    }
+
+    /// <summary>
+    /// Paying a card bill shows up twice: money out of the bank account, money into the card.
+    /// When both accounts are in the app, the two sides find each other by amount within a few days,
+    /// whatever the bank calls the payment. Only bank→card counts: a purchase on a card never pairs
+    /// with money coming into a bank account, however the amounts line up.
+    /// </summary>
+    private async Task<Transaction?> FindCardPaymentPartnerAsync(StatementRow r, Account account, CancellationToken ct)
+    {
+        var isCard = account.Kind == AccountKind.CreditCard;
+        // Bank side: money out, looking for money into a card. Card side: money in, looking for money out of a bank.
+        if (isCard != r.IsCredit) return null;
+
+        var otherIds = await db.Accounts.AsNoTracking()
+            .Where(a => a.Id != account.Id && (isCard ? a.Kind != AccountKind.CreditCard : a.Kind == AccountKind.CreditCard))
+            .Select(a => a.Id).ToListAsync(ct);
+        if (otherIds.Count == 0) return null;
+
+        var from = clock.LocalDateStartToUtc(r.Date.AddDays(-StatementMatcher.DaysBefore));
+        var to = clock.LocalDateStartToUtc(r.Date.AddDays(StatementMatcher.DaysBefore + 1));
+        var wantIncome = !r.IsCredit; // the other side moves the opposite way
+        // Amount is checked after loading: SQLite can't compare decimals in SQL.
+        var candidates = await db.Transactions.Include(t => t.Account)
+            .Where(t => t.AccountId != null && otherIds.Contains(t.AccountId.Value) && t.IsIncome == wantIncome
+                        && t.OccurredAtUtc >= from && t.OccurredAtUtc < to)
+            .ToListAsync(ct);
+        return candidates.Where(t => t.Amount == r.Amount)
+            .OrderBy(t => Math.Abs(clock.ToLocalDate(t.OccurredAtUtc).DayNumber - r.Date.DayNumber))
+            .FirstOrDefault();
     }
 
     /// <summary>Statements give a day, not a time. Midday keeps it on that day in any time zone handling.</summary>

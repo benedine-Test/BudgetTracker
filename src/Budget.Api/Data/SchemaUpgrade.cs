@@ -89,6 +89,7 @@ public static class SchemaUpgrade
                           [PreviousBalanceAsOfUtc] datetime2 NOT NULL,
                           [SetBalanceAsOfUtc] datetime2 NULL,
                           [SetAnchorBalance] decimal(18,2) NULL,
+                          [Recategorised] nvarchar(max) NULL,
                           [PreviousLastImportAtUtc] datetime2 NULL,
                           [UndoneAtUtc] datetime2 NULL,
                           CONSTRAINT [PK_ImportBatches] PRIMARY KEY ([Id])
@@ -107,6 +108,7 @@ public static class SchemaUpgrade
                           "PreviousBalanceAsOfUtc" TEXT NOT NULL,
                           "SetBalanceAsOfUtc" TEXT NULL,
                           "SetAnchorBalance" TEXT NULL,
+                          "Recategorised" TEXT NULL,
                           "PreviousLastImportAtUtc" TEXT NULL,
                           "UndoneAtUtc" TEXT NULL
                       );

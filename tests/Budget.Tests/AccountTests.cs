@@ -204,6 +204,8 @@ public class StatementMatcherTests
     [InlineData("BILL PAYMENT DBS VISA CARD", true)]
     [InlineData("SHOPEE SINGAPORE", false)]
     [InlineData("FAST PAYMENT TO JOHN TAN", false)]
+    [InlineData("BILL PAYMENT DBSC-4119 : I-BANK", true)]
+    [InlineData("BILL PAYMENT SP SERVICES", false)]
     public void Spots_card_bill_payments(string text, bool expected) =>
         Assert.Equal(expected, StatementMatcher.LooksLikeCardPayment(text));
 
@@ -409,6 +411,69 @@ public sealed class StatementImportTests : IDisposable
 
         await _accounts.UndoAsync(a, first.BatchId); // now the first is the latest
         Assert.Equal(0, await _db.Transactions.CountAsync());
+    }
+
+    private async Task<Account> AddCardAsync(string name)
+    {
+        var c = new Account { Name = name, Kind = AccountKind.CreditCard, AnchorBalance = 0m, BalanceAsOfUtc = Local(1, 0) };
+        _db.Accounts.Add(c);
+        await _db.SaveChangesAsync();
+        return c;
+    }
+
+    private static ImportRowIn Line(int day, string text, decimal amount, bool credit) =>
+        new(new DateOnly(2026, 10, day), text, amount, credit, false);
+
+    [Fact]
+    public async Task Card_bill_paid_from_the_bank_is_a_transfer_whichever_statement_comes_first()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var card = await AddCardAsync("DBS yuu Card");
+
+        // Bank statement first. The bank's wording isn't recognisable as a card payment…
+        await _accounts.CommitAsync(bank, [Line(10, "FUNDS TRANSFER I-BANK 4119", 800m, false)], [], null, null);
+        var bankSide = await _db.Transactions.AsNoTracking().SingleAsync();
+        Assert.Null(bankSide.CategoryId);
+        Assert.Equal(800m, (await _budgets.SummaryAsync(new DateOnly(2026, 10, 10))).TotalSpent); // counted as spending, wrongly
+
+        // …until the card statement shows the same S$800 arriving two days later.
+        var preview = await _accounts.PreviewAsync(card,
+            new ParsedStatement([], new ColumnMap(), [new StatementRow(1, new DateOnly(2026, 10, 12), "PAYMT THRU E-BANK", 800m, true, null)], 0, null, null, null),
+            positiveIsSpend: true);
+        Assert.Equal("Transfer from DBS Savings", preview.Rows.Single().Category);
+        Assert.False(preview.Rows.Single().SuggestSalary);
+
+        var result = await _accounts.CommitAsync(card, [Line(12, "PAYMT THRU E-BANK", 800m, true)], [], null, null);
+
+        Assert.All(await _db.Transactions.Include(t => t.Category).ToListAsync(), t => Assert.Equal("Transfer", t.Category?.Name));
+        Assert.Equal(0m, (await _budgets.SummaryAsync(new DateOnly(2026, 10, 10))).TotalSpent);
+
+        // Undoing the card import puts the bank side back as it was.
+        await _accounts.UndoAsync(card, result.BatchId);
+        Assert.Null((await _db.Transactions.AsNoTracking().SingleAsync()).CategoryId);
+    }
+
+    [Fact]
+    public async Task Card_statement_first_then_bank_statement_pairs_too()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var card = await AddCardAsync("UOB One Card");
+        await _accounts.CommitAsync(card, [Line(12, "PAYMENT RECEIVED", 640m, true)], [], null, null);
+        await _accounts.CommitAsync(bank, [Line(11, "IBG GIRO 123456", 640m, false)], [], null, null);
+
+        Assert.All(await _db.Transactions.Include(t => t.Category).ToListAsync(), t => Assert.Equal("Transfer", t.Category?.Name));
+    }
+
+    [Fact]
+    public async Task A_card_purchase_never_pairs_with_money_into_the_bank()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var card = await AddCardAsync("DBS yuu Card");
+        await _accounts.CommitAsync(bank, [Line(10, "FAST TRANSFER FROM JANE", 50m, true)], [], null, null);
+        await _accounts.CommitAsync(card, [Line(10, "GRAB* RIDE", 50m, false)], [], null, null);
+
+        var grab = await _db.Transactions.Include(t => t.Category).SingleAsync(t => t.Merchant == "GRAB* RIDE");
+        Assert.Equal("Transport", grab.Category?.Name);
     }
 
     [Fact]
