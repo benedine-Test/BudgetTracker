@@ -167,13 +167,15 @@ public class BudgetService(BudgetDbContext db, Clock clock)
             .ToListAsync(ct);
 
         var spends = txs.Where(t => t.Category?.Bucket is not (Bucket.Transfer or Bucket.Income)).ToList();
+        // A bill paid for others counts only your share, here in the period you paid it,
+        // however much later they pay you back.
 
         var today = clock.Today;
         var daysLeft = Math.Max(0, period.EndDate.DayNumber - Math.Max(today.DayNumber, period.StartDate.DayNumber));
 
         BucketStatus Status(Bucket bucket, decimal budget)
         {
-            var spent = spends.Where(t => t.Category?.Bucket == bucket).Sum(t => t.Amount);
+            var spent = spends.Where(t => t.Category?.Bucket == bucket).Sum(t => t.CountedAmount);
             var remaining = budget - spent;
             var pct = budget == 0 ? (spent > 0 ? 100 : 0) : Math.Round(spent / budget * 100, 1);
             // For savings, "over" is good news — you saved more than planned.
@@ -192,7 +194,7 @@ public class BudgetService(BudgetDbContext db, Clock clock)
         };
 
         var uncategorised = spends.Where(t => t.CategoryId is null).ToList();
-        var totalSpent = spends.Sum(t => t.Amount);
+        var totalSpent = spends.Sum(t => t.CountedAmount);
 
         var top = spends
             .GroupBy(t => t.CategoryId)
@@ -200,7 +202,7 @@ public class BudgetService(BudgetDbContext db, Clock clock)
                 g.Key,
                 g.First().Category?.Name ?? "Uncategorised",
                 g.First().Category?.Bucket.ToString() ?? "Unassigned",
-                g.Sum(t => t.Amount),
+                g.Sum(t => t.CountedAmount),
                 g.Count()))
             .OrderByDescending(c => c.Total)
             .Take(8)
@@ -208,7 +210,7 @@ public class BudgetService(BudgetDbContext db, Clock clock)
 
         return new BudgetSummary(
             period.StartDate, period.EndDate, daysLeft, recorded, period.TakeHomeIncome,
-            buckets, uncategorised.Sum(t => t.Amount), uncategorised.Count,
+            buckets, uncategorised.Sum(t => t.CountedAmount), uncategorised.Count,
             totalSpent, period.TakeHomeIncome - totalSpent, top);
     }
 }

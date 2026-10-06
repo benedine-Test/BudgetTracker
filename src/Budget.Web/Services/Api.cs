@@ -17,13 +17,22 @@ public record BudgetSummary(DateOnly PeriodStart, DateOnly PeriodEndExclusive, i
 
 public record TransactionDto(int Id, DateTimeOffset OccurredAt, decimal Amount, string Currency, bool IsIncome,
     string Merchant, string? Card, string? Notes, string Source, string? MergedSources,
-    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account);
+    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account,
+    decimal? MyShare = null, string? SharedWith = null, decimal? Owed = null, decimal Repaid = 0, int? RepaysId = null)
+{
+    /// <summary>What it costs you: your share of a bill you paid for others too, else all of it.</summary>
+    public decimal Counted => MyShare ?? Amount;
+}
+
+public record OwedDto(TransactionDto Bill, decimal Owed, decimal Repaid);
+
+public record OwedList(decimal Total, List<OwedDto> Bills);
 
 public record AccountDto(int Id, string Name, string Kind, string Currency, decimal Balance,
     decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived, DateTimeOffset? LastImportAt);
 
 public record AccountsSummary(decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
-    int UnassignedSinceOldest, List<AccountDto> Accounts);
+    int UnassignedSinceOldest, List<AccountDto> Accounts, decimal OwedToYou = 0);
 
 public record ColumnMap(string? Date, List<string>? Description, string? Debit, string? Credit,
     string? Amount, string? Direction, string? Balance);
@@ -100,6 +109,7 @@ public class Api(HttpClient http)
         switch (filter)
         {
             case "sort": parts.Add("uncategorised=true"); break;
+            case "shared": parts.Add("shared=true"); break;
             case "needs" or "wants" or "savings" or "income": parts.Add($"bucket={filter}"); break;
         }
         if (!string.IsNullOrWhiteSpace(from)) parts.Add($"from={Uri.EscapeDataString(from)}");
@@ -131,6 +141,32 @@ public class Api(HttpClient http)
             new { categoryId, learnRule, applyToSimilar = learnRule });
         return (await r.Content.ReadFromJsonAsync<CategoriseResult>(Json))!;
     }
+
+    public Task<TransactionDto> Transaction(int id) => Get<TransactionDto>($"api/transactions/{id}");
+
+    // ---- Paying for friends ----
+    /// <summary>myShare null makes the bill all yours again.</summary>
+    public async Task<TransactionDto> SetShare(int id, decimal? myShare, string? sharedWith)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/transactions/{id}/share", new { myShare, sharedWith });
+        return (await r.Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+    }
+
+    /// <summary>Links money already in the app as a repayment of a bill.</summary>
+    public Task<TransactionDto> LinkRepayment(int billId, int repaymentId) =>
+        Post<TransactionDto>($"api/transactions/{billId}/repayments", new { repaymentId });
+
+    /// <summary>Records a repayment that isn't in the app yet (date ISO with offset).</summary>
+    public Task<TransactionDto> RecordRepayment(int billId, decimal amount, string date, int? accountId) =>
+        Post<TransactionDto>($"api/transactions/{billId}/repayments", new { amount, date, accountId });
+
+    public Task UnlinkRepayment(int repaymentId) => Send(HttpMethod.Delete, $"api/transactions/{repaymentId}/repays");
+
+    public Task<TransactionDto> WriteOff(int billId) => Post<TransactionDto>($"api/transactions/{billId}/write-off", new { });
+
+    /// <summary>Bills with money still owed back, the ones a repayment of <paramref name="amount"/> fits first.</summary>
+    public Task<OwedList> Owed(decimal? amount = null) =>
+        Get<OwedList>("api/owed" + (amount is { } a ? "?amount=" + a.ToString(System.Globalization.CultureInfo.InvariantCulture) : ""));
 
     public Task DeleteTransaction(int id) => Send(HttpMethod.Delete, $"api/transactions/{id}");
 

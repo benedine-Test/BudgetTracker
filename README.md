@@ -72,13 +72,20 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 4. If the file has a balance column, it compares the bank's closing balance with the app's and offers to reset to the bank's figure — the bank is the truth.
 5. **Wrong, or just a test?** The account lists its recent imports with **Undo**: the import's entries are removed (a salary line's budget too), entries it filed are unfiled, and the balance goes back to what it was — unless you've set the balance by hand since, which is kept. Only the latest import of an account can be undone (undo newer ones first). Then fix things and import again. Imports made before this feature existed can't be undone.
 
+**Paying for friends.** Paid S$100 for dinner and your friend owes you half? Open the entry under Spending → *I paid for others too*, enter your share (S$50) and, optionally, who owes the rest.
+- Only your share counts toward the budget, in the pay period you paid, however late they pay you back. The entry keeps its full S$100, so the account balance and statement matching stay right.
+- The rest shows as owed: on the entry, under the **Shared** filter, and as *Friends owe you* on Accounts.
+- When the money comes in (a PayNow, from a statement import or added by hand), open that entry → *Is this someone paying you back?* and pick the bill; bills owed exactly that amount are listed first. It's filed as **Paid Back**, which never counts as income or spend. Paid in cash? Use *They paid me back* on the bill instead. Several part-payments are fine; more than is owed is refused.
+- They won't pay? *They won't pay* turns what's still owed into your spending, in the period you paid the bill.
+- Deleting a bill (or undoing the import that added it) keeps its repayments as Other Income.
+
 **Fixing an entry.** Tap any entry under Spending → *Fix this entry* to change its amount, description or date. A salary's amount or date can't be edited there (it set the period's budget) — delete it and record it again.
 
 What it does for you: card bill payments are filed as **Transfer** so they don't count as spending twice — recognised by their wording ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD/DBSC"), and, when both the bank account and the card are in the app, by pairing money out of the bank with the same amount arriving on the card within 5 days, whatever the bank calls it and whichever statement you import first (undo puts the other side back). A card purchase never pairs with money coming into a bank account; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
 
 Limits: scanned PDFs can't be read. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF or Excel file, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
-**Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
+**Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables, `Transactions.AccountId` / `ImportBatchId` / `MyShare` / `SharedWith` / `RepaysId` and the Paid Back category are added if missing), so publishing over the live site keeps your data.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -118,7 +125,12 @@ Things to check in your first week:
 | GET | `/api/budget/history` | Budget vs actual for each recorded pay period |
 | GET | `/api/budget/periods` | All pay periods |
 | GET/PUT | `/api/settings` | `payDay`, `needsPct`, `wantsPct`, `savingsPct` (must total 100) |
-| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled). PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
+| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled), `shared`. PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
+| PUT | `/api/transactions/{id}/share` | `{myShare, sharedWith?}` — only your share counts toward the budget; `myShare: null` makes it all yours again (refused once anything's repaid) |
+| POST | `/api/transactions/{id}/repayments` | `{repaymentId}` links money already in the app, or `{amount, date?, accountId?, note?}` records a new repayment |
+| DELETE | `/api/transactions/{id}/repays` | On a repayment: unlink it (back to Other Income) |
+| POST | `/api/transactions/{id}/write-off` | What's still owed becomes your share |
+| GET | `/api/owed?amount=` | Bills with money owed back, total; those matching `amount` first |
 | POST | `/api/transactions/{id}/categorise` | `{categoryId, learnRule=true, pattern?, applyToSimilar=true}` |
 | DELETE | `/api/transactions/{id}` | |
 | GET/POST/PUT | `/api/categories[/{id}]` | Move a category between Needs / Wants / Savings / Income / Transfer |
@@ -128,7 +140,7 @@ Things to check in your first week:
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
 | POST | `/api/holdings/refresh?force=` | Fetch due prices (`autoPrice` holdings) and exchange rates from Yahoo Finance |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
-| GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
+| GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count, owed to you by friends |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
 | PUT | `/api/accounts/{id}/balance` | `{balance, asOf?}` — "the bank shows this now" |
 | POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}`, `{excel: base64, password?, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |

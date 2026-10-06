@@ -177,12 +177,12 @@ public static class BudgetEndpoints
         {
             var rows = await db.Transactions.AsNoTracking().Include(t => t.Category).Include(t => t.Account)
                 .OrderBy(t => t.OccurredAtUtc).ToListAsync(ct);
-            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Account,Card,Source,Notes\n");
-            foreach (var t in rows.Select(TransactionEndpoints.ToDto))
+            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Account,Card,Source,Notes,MyShare,SharedWith\n");
+            foreach (var t in rows.Select(r => TransactionEndpoints.ToDto(r)))
                 sb.AppendLine(string.Join(',',
                     t.OccurredAt.ToString("yyyy-MM-dd HH:mm"), t.Amount.ToString("0.00"), t.Currency,
                     t.IsIncome ? "Income" : "Spend", Csv(t.Merchant), Csv(t.Category), t.Bucket ?? "",
-                    Csv(t.Account), Csv(t.Card), t.Source, Csv(t.Notes)));
+                    Csv(t.Account), Csv(t.Card), t.Source, Csv(t.Notes), t.MyShare?.ToString("0.00") ?? "", Csv(t.SharedWith)));
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "transactions.csv");
         });
     }

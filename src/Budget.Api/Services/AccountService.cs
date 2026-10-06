@@ -8,9 +8,10 @@ public record AccountView(
     decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived,
     DateTimeOffset? LastImportAt);
 
+/// <param name="OwedToYou">What friends still owe you on bills you paid for them (not part of Net).</param>
 public record AccountsSummary(
     decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
-    int UnassignedSinceOldest, IReadOnlyList<AccountView> Accounts);
+    int UnassignedSinceOldest, IReadOnlyList<AccountView> Accounts, decimal OwedToYou = 0);
 
 public record ImportPreviewRow(
     int Index, DateOnly Date, string Description, decimal Amount, bool IsCredit, decimal? Balance,
@@ -68,7 +69,8 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         var active = views.Where(v => !v.IsArchived && v.Currency == settings.BaseCurrency).ToList();
         var inAccounts = active.Where(v => v.Kind != nameof(AccountKind.CreditCard)).Sum(v => v.Balance);
         var owed = -active.Where(v => v.Kind == nameof(AccountKind.CreditCard)).Sum(v => v.Balance);
-        return new AccountsSummary(inAccounts, owed, inAccounts - owed, settings.BaseCurrency, unassigned, views);
+        var owedToYou = await new SharedBills(db).TotalOwedAsync(settings.BaseCurrency, ct);
+        return new AccountsSummary(inAccounts, owed, inAccounts - owed, settings.BaseCurrency, unassigned, views, owedToYou);
     }
 
     public async Task<decimal> BalanceAsync(Account a, CancellationToken ct = default)
@@ -330,6 +332,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         var added = await db.Transactions.Include(t => t.Category).Where(t => t.ImportBatchId == batch.Id).ToListAsync(ct);
         foreach (var t in added.Where(t => t.IsIncome && t.Category?.Name == "Salary"))
             await budgets.ReverseSalaryAsync(t, ct);
+        await SharedBills.DetachRepaymentsAsync(db, added.Select(t => t.Id).ToList(), ct);
         db.Transactions.RemoveRange(added);
 
         var ids = (batch.LinkedIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToList();
