@@ -55,11 +55,14 @@ public record CategoryDto(int Id, string Name, string Bucket, bool IsArchived);
 
 public record SettingsDto(int PayDay, decimal NeedsPct, decimal WantsPct, decimal SavingsPct);
 
+public record ProfileDto(DateOnly? BirthDate);
+
 public record HoldingValue(int Id, string Symbol, string Name, string AssetClass, string? Platform,
     decimal Units, decimal AverageCost, string Currency, decimal FxToBase, decimal? LastPrice, DateTime? LastPriceAtUtc,
     decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct, bool PriceIsStale,
     bool AutoPrice, string? PriceError, string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
-    int ContributionCount, decimal ContributedBase, DateTimeOffset? LastContributionAtUtc, decimal NotInFiguresBase);
+    int ContributionCount, decimal ContributedBase, DateTimeOffset? LastContributionAtUtc, decimal NotInFiguresBase,
+    decimal SalaryCpfNotInBalanceBase);
 
 public record PriceRefreshResult(int Updated, int Failed, int Skipped, string Message);
 
@@ -92,8 +95,11 @@ public class Api(HttpClient http)
 
     public Task SaveSettings(SettingsDto s) => Send(HttpMethod.Put, "api/settings", s);
 
-    public Task RecordIncome(decimal amount, string kind, string? date, string? note, int? accountId) =>
-        Send(HttpMethod.Post, "api/income", new { amount, kind, date, note, accountId });
+    public Task<ProfileDto> Profile() => Get<ProfileDto>("api/profile");
+    public Task SaveProfile(ProfileDto p) => Send(HttpMethod.Put, "api/profile", p);
+
+    public Task RecordIncome(decimal amount, string kind, string? date, string? note, int? accountId, decimal? cpf = null) =>
+        Send(HttpMethod.Post, "api/income", new { amount, kind, date, note, accountId, cpf });
 
     // ---- Transactions ----
     public Task<List<TransactionDto>> Transactions(string? filter, string? from, string? to, string? search, int? accountId = null)

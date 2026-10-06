@@ -136,6 +136,21 @@ public static class SchemaUpgrade
                     : "CREATE INDEX \"IX_Transactions_ImportBatchId\" ON \"Transactions\" (\"ImportBatchId\");", ct);
             }
 
+            // ---- CPF paid on a salary, added to the CPF holdings ----
+            if (!await ColumnExistsAsync(conn, "Transactions", "CpfContribution", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Transactions] ADD [CpfContribution] decimal(18,2) NULL;"
+                    : "ALTER TABLE \"Transactions\" ADD COLUMN \"CpfContribution\" TEXT NULL;", ct);
+            }
+
+            // ---- Date of birth on the Profile page ----
+            if (await TableExistsAsync(conn, "Settings", sqlServer, ct)
+                && !await ColumnExistsAsync(conn, "Settings", "BirthDate", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Settings] ADD [BirthDate] date NULL;"
+                    : "ALTER TABLE \"Settings\" ADD COLUMN \"BirthDate\" TEXT NULL;", ct);
             // ---- Shared bills (your share, who owes the rest, repayments) ----
             if (!await ColumnExistsAsync(conn, "Transactions", "RepaysId", sqlServer, ct))
             {

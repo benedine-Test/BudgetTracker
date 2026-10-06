@@ -136,6 +136,10 @@ public class Transaction
     public bool CategoryConfirmed { get; set; }
 
     /// <summary>
+    /// On a salary worked out from base pay: the CPF paid on it, employee and employer together.
+    /// It is added to the CPF holdings (see Portfolio.SalaryCpf); deleting the salary takes it back out.
+    /// </summary>
+    public decimal? CpfContribution { get; set; }
     /// A bill paid for others too: the part that was yours. Only this counts toward the budget;
     /// the rest is owed back until repayments (<see cref="RepaysId"/>) cover it or it's written off.
     /// Null = all of it was yours.
@@ -185,6 +189,8 @@ public class AppSettings
     public decimal SavingsPct { get; set; } = 20;
     public string TimeZoneId { get; set; } = "Asia/Singapore";
     public string BaseCurrency { get; set; } = "SGD";
+    /// <summary>From the Profile page. Sets the CPF age band for each salary (see Payslip.AgeBandOn).</summary>
+    public DateOnly? BirthDate { get; set; }
 }
 
 public enum AssetClass

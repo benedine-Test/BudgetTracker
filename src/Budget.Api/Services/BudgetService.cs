@@ -38,7 +38,7 @@ public class BudgetService(BudgetDbContext db, Clock clock)
     /// </summary>
     public async Task<(Transaction Tx, BudgetPeriod Period)> RecordSalaryAsync(
         decimal amount, DateTime occurredAtUtc, string? note, int? accountId = null,
-        TransactionSource source = TransactionSource.Manual, CancellationToken ct = default)
+        TransactionSource source = TransactionSource.Manual, decimal? cpfContribution = null, CancellationToken ct = default)
     {
         var settings = await GetSettingsAsync(ct);
         var salaryCat = await db.Categories.SingleAsync(c => c.Name == "Salary", ct);
@@ -54,7 +54,8 @@ public class BudgetService(BudgetDbContext db, Clock clock)
             Source = source,
             AccountId = accountId,
             CategoryId = salaryCat.Id,
-            CategoryConfirmed = true
+            CategoryConfirmed = true,
+            CpfContribution = cpfContribution is > 0 ? Math.Round(cpfContribution.Value, 2) : null
         };
         db.Transactions.Add(tx);
 
