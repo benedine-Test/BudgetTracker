@@ -155,11 +155,22 @@ public static class TransactionEndpoints
 
         api.MapPut("/transactions/{id:int}", async (int id, TransactionUpdate body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
         {
-            var t = await db.Transactions.FirstOrDefaultAsync(x => x.Id == id, ct);
+            var t = await db.Transactions.Include(x => x.Category).FirstOrDefaultAsync(x => x.Id == id, ct);
             if (t is null) return Results.NotFound();
-            if (body.Amount is decimal a && a > 0) t.Amount = Math.Round(a, 2);
-            if (!string.IsNullOrWhiteSpace(body.Merchant)) t.Merchant = body.Merchant.Trim();
-            if (!string.IsNullOrWhiteSpace(body.Date)) t.OccurredAtUtc = clock.ParseToUtc(body.Date);
+            if (body.Amount is decimal neg && neg <= 0) return Results.BadRequest(new { message = "Amount must be above zero." });
+            var newAmount = body.Amount is decimal a ? Math.Round(a, 2) : t.Amount;
+            var newWhen = string.IsNullOrWhiteSpace(body.Date) ? t.OccurredAtUtc : clock.ParseToUtc(body.Date);
+            // A salary also set its pay period's budget; changing it here would leave that budget wrong.
+            if (t.IsIncome && t.Category?.Name == "Salary" && (newAmount != t.Amount || newWhen != t.OccurredAtUtc))
+                return Results.BadRequest(new { message = "To change a salary, delete it and record it again so the budget updates too." });
+            t.Amount = newAmount;
+            t.OccurredAtUtc = newWhen;
+            if (body.Merchant is not null)
+            {
+                var name = body.Merchant.Trim();
+                if (name.Length == 0) return Results.BadRequest(new { message = "The shop or description can't be empty." });
+                t.Merchant = name.Length > 200 ? name[..200] : name;
+            }
             if (body.Notes is not null) t.Notes = body.Notes;
             if (body.CategoryId is int cid)
             {

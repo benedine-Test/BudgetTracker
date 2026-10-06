@@ -69,12 +69,15 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 2. It shows each line as **already in the app** or **missing**. A purchase matches an existing entry with the same amount up to 5 days earlier (banks post card taps 1–3 days late); each entry is used once, so two identical coffees need two entries. Entries already filed under a *different* account are never matched.
 3. Untick anything you don't want, tick **This is my salary** on a pay credit to open the budget period, and add.
 4. If the file has a balance column, it compares the bank's closing balance with the app's and offers to reset to the bank's figure — the bank is the truth.
+5. **Wrong, or just a test?** The account lists its recent imports with **Undo**: the import's entries are removed (a salary line's budget too), entries it filed are unfiled, and the balance goes back to what it was — unless you've set the balance by hand since, which is kept. Only the latest import of an account can be undone (undo newer ones first). Then fix things and import again. Imports made before this feature existed can't be undone.
+
+**Fixing an entry.** Tap any entry under Spending → *Fix this entry* to change its amount, description or date. A salary's amount or date can't be edited there (it set the period's budget) — delete it and record it again.
 
 What it does for you: card bill payments ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD") are filed as **Transfer** so they don't count as spending twice; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
 
 Limits: scanned PDFs can't be read; Excel files must be saved as CSV first. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
-**Existing databases** are upgraded on startup (the `Accounts` table and `Transactions.AccountId` are added if missing), so publishing over the live site keeps your data.
+**Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -113,7 +116,7 @@ Things to check in your first week:
 | GET | `/api/budget/history` | Budget vs actual for each recorded pay period |
 | GET | `/api/budget/periods` | All pay periods |
 | GET/PUT | `/api/settings` | `payDay`, `needsPct`, `wantsPct`, `savingsPct` (must total 100) |
-| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled). PUT `accountId` 0 unfiles |
+| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled). PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
 | POST | `/api/transactions/{id}/categorise` | `{categoryId, learnRule=true, pattern?, applyToSimilar=true}` |
 | DELETE | `/api/transactions/{id}` | |
 | GET/POST/PUT | `/api/categories[/{id}]` | Move a category between Needs / Wants / Savings / Income / Transfer |
@@ -126,7 +129,9 @@ Things to check in your first week:
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
 | PUT | `/api/accounts/{id}/balance` | `{balance, asOf?}` — "the bank shows this now" |
 | POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |
-| POST | `/api/accounts/{id}/import` | `{add: [{date, description, amount, isCredit, isSalary}], link: [ids], statementBalance?, statementBalanceDate?}` |
+| POST | `/api/accounts/{id}/import` | `{add: [{date, description, amount, isCredit, isSalary}], link: [ids], statementBalance?, statementBalanceDate?, fileName?}` → includes `batchId` |
+| GET | `/api/accounts/{id}/imports` | Recent imports, newest first, with `canUndo` |
+| DELETE | `/api/accounts/{id}/imports/{batchId}` | Undo an import (latest only; 409 otherwise) |
 
 **Budget buckets.** Savings-bucket categories (Investments, Emergency Fund, Savings Goals) count as *contributions*, so you can see progress toward the 20%. Transfer and Income categories never count as spend.
 

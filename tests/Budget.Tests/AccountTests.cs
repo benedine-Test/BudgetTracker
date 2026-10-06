@@ -352,6 +352,66 @@ public sealed class StatementImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Undo_puts_everything_back_as_it_was()
+    {
+        var a = await AddAccountAsync(1000m, 1);
+        var tap = await _tx.IngestSpendAsync(7.80m, "SGD", "Starbucks", "iPhone", Local(2), TransactionSource.ApplePayShortcut, null);
+
+        var result = await _accounts.CommitAsync(a,
+            [
+                new ImportRowIn(new DateOnly(2026, 10, 3), "SP DIGITAL", 120m, false, false),
+                new ImportRowIn(new DateOnly(2026, 10, 25), "SALARY ACME", 4200m, true, true),
+            ],
+            [tap.Transaction.Id], 5000m, new DateOnly(2026, 10, 26), fileName: "oct.pdf");
+        Assert.Equal(1, await _db.BudgetPeriods.CountAsync());
+        Assert.Equal(5000m, result.Balance);
+
+        var undo = await _accounts.UndoAsync(a, result.BatchId);
+
+        Assert.Equal(1, await _db.Transactions.CountAsync());          // only the original tap is left
+        var back = await _db.Transactions.AsNoTracking().SingleAsync();
+        Assert.Null(back.AccountId);                                      // unfiled again
+        Assert.Null(back.MergedSources);
+        Assert.Equal(0, await _db.BudgetPeriods.CountAsync());           // the salary's budget is gone too
+        Assert.Equal(1000m, undo.Balance);                                // balance as before the import
+        var acct = await _db.Accounts.AsNoTracking().SingleAsync();
+        Assert.Equal(Local(1, 0), acct.BalanceAsOfUtc);
+        Assert.Null(acct.LastImportAtUtc);
+
+        var history = await _accounts.ImportsAsync(a.Id);
+        Assert.NotNull(history.Single().UndoneAt);
+        await Assert.ThrowsAsync<ImportUndoException>(() => _accounts.UndoAsync(a, result.BatchId)); // not twice
+
+        // And the same statement can be imported again afterwards.
+        var again = await _accounts.CommitAsync(a, [new ImportRowIn(new DateOnly(2026, 10, 3), "SP DIGITAL", 120m, false, false)], [], null, null);
+        Assert.Equal(880m, again.Balance);
+    }
+
+    [Fact]
+    public async Task Only_the_latest_import_can_be_undone_and_a_later_manual_balance_is_kept()
+    {
+        var a = await AddAccountAsync(1000m, 1);
+        var first = await _accounts.CommitAsync(a, [new ImportRowIn(new DateOnly(2026, 10, 3), "SHOP", 10m, false, false)], [], 990m, new DateOnly(2026, 10, 3));
+        var second = await _accounts.CommitAsync(a, [new ImportRowIn(new DateOnly(2026, 10, 5), "SHOP 2", 20m, false, false)], [], 970m, new DateOnly(2026, 10, 5));
+
+        await Assert.ThrowsAsync<ImportUndoException>(() => _accounts.UndoAsync(a, first.BatchId));
+
+        // The person corrects the balance by hand after the import: undo mustn't overwrite that.
+        var tracked = await _db.Accounts.SingleAsync();
+        tracked.AnchorBalance = 2000m;
+        tracked.BalanceAsOfUtc = Local(6, 0);
+        await _db.SaveChangesAsync();
+
+        var undo = await _accounts.UndoAsync(a, second.BatchId);
+        Assert.Contains("set by hand", undo.Message);
+        Assert.Equal(2000m, undo.Balance);
+        Assert.Equal(1, await _db.Transactions.CountAsync());
+
+        await _accounts.UndoAsync(a, first.BatchId); // now the first is the latest
+        Assert.Equal(0, await _db.Transactions.CountAsync());
+    }
+
+    [Fact]
     public async Task Pdf_balance_of_a_bank_account_stays_positive()
     {
         var a = await AddAccountAsync(0m, 1);

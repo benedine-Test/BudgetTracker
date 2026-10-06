@@ -18,7 +18,7 @@ public class PdfStatementTests
             var p = builder.AddPage(PageSize.A4);
             foreach (var (_, y, x, text, right) in page)
             {
-                var width = right ? p.MeasureText(text, 9, new PdfPoint(0, 0), font).Max(l => l.GlyphRectangle.Right) : 0;
+                var width = right ? p.MeasureText(text, 9, new PdfPoint(0, 0), font).Max(l => l.BoundingBox.Right) : 0;
                 p.AddText(text, 9, new PdfPoint(right ? x - width : x, y), font);
             }
         }

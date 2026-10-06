@@ -11,6 +11,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<AppSettings> Settings => Set<AppSettings>();
     public DbSet<Holding> Holdings => Set<Holding>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -25,6 +26,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.HasIndex(t => t.OccurredAtUtc);
             // Deleting an account keeps its history, just unlinked.
             e.HasOne(t => t.Account).WithMany().HasForeignKey(t => t.AccountId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(t => t.ImportBatchId);
         });
 
         b.Entity<Account>(e =>
@@ -33,6 +35,14 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(a => a.Currency).HasMaxLength(3);
             e.Property(a => a.CardNames).HasMaxLength(500);
             e.Property(a => a.AnchorBalance).HasPrecision(18, 2);
+        });
+
+        b.Entity<ImportBatch>(e =>
+        {
+            e.Property(i => i.FileName).HasMaxLength(200);
+            e.Property(i => i.PreviousAnchorBalance).HasPrecision(18, 2);
+            e.Property(i => i.SetAnchorBalance).HasPrecision(18, 2);
+            e.HasIndex(i => i.AccountId);
         });
 
         b.Entity<BudgetPeriod>(e =>

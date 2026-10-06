@@ -52,6 +52,30 @@ public class Account
     public DateTime? LastImportAtUtc { get; set; }
 }
 
+/// <summary>
+/// One statement import, kept so it can be undone: the entries it added carry its id, and it
+/// remembers which existing entries it filed and the balance it replaced.
+/// </summary>
+public class ImportBatch
+{
+    public int Id { get; set; }
+    public int AccountId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public string? FileName { get; set; }
+    public int Added { get; set; }
+    /// <summary>Existing entries this import filed under the account (comma-separated ids), unfiled again on undo.</summary>
+    public string? LinkedIds { get; set; }
+    /// <summary>Set when the import reset the balance: what it was before, restored on undo.</summary>
+    public bool ResetBalance { get; set; }
+    public decimal PreviousAnchorBalance { get; set; }
+    public DateTime PreviousBalanceAsOfUtc { get; set; }
+    /// <summary>The balance date this import set; if the balance was changed again since, undo leaves it.</summary>
+    public DateTime? SetBalanceAsOfUtc { get; set; }
+    public decimal? SetAnchorBalance { get; set; }
+    public DateTime? PreviousLastImportAtUtc { get; set; }
+    public DateTime? UndoneAtUtc { get; set; }
+}
+
 public class Category
 {
     public int Id { get; set; }
@@ -93,6 +117,9 @@ public class Transaction
     /// <summary>Which account the money moved in. Null = not known yet (doesn't affect any balance).</summary>
     public int? AccountId { get; set; }
     public Account? Account { get; set; }
+
+    /// <summary>The statement import that added this entry, if any (see ImportBatch).</summary>
+    public int? ImportBatchId { get; set; }
 
     public TransactionSource Source { get; set; }
     /// <summary>Other sources that reported the same transaction and were merged into this one.</summary>

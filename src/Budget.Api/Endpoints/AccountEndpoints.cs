@@ -20,7 +20,8 @@ public record ImportPreviewRequest(string? Csv, bool? PositiveIsSpend, ColumnMap
 /// Add = statement lines to create. Link = existing entries the statement confirmed, filed under
 /// this account. StatementBalance/Date (already in the app's sign) resets the balance to the bank's.
 /// </summary>
-public record ImportCommitRequest(List<ImportRowIn>? Add, List<int>? Link, decimal? StatementBalance, DateOnly? StatementBalanceDate);
+public record ImportCommitRequest(List<ImportRowIn>? Add, List<int>? Link, decimal? StatementBalance, DateOnly? StatementBalanceDate,
+    string? FileName = null);
 
 public static class AccountEndpoints
 {
@@ -139,7 +140,21 @@ public static class AccountEndpoints
             if ((body.StatementBalance is null) != (body.StatementBalanceDate is null))
                 return Results.BadRequest(new { message = "Send the statement balance together with its date." });
 
-            return Results.Ok(await svc.CommitAsync(a, add, body.Link ?? [], body.StatementBalance, body.StatementBalanceDate, ct));
+            return Results.Ok(await svc.CommitAsync(a, add, body.Link ?? [], body.StatementBalance, body.StatementBalanceDate, ct, body.FileName));
+        });
+
+        // Past imports, newest first. Only the latest one that's still in can be undone.
+        api.MapGet("/accounts/{id:int}/imports", async (int id, BudgetDbContext db, AccountService svc, CancellationToken ct) =>
+            await db.Accounts.AnyAsync(a => a.Id == id, ct) ? Results.Ok(await svc.ImportsAsync(id, ct)) : Results.NotFound());
+
+        // Undo a test import (or a wrong one): its entries go, the balance goes back.
+        api.MapDelete("/accounts/{id:int}/imports/{batchId:int}", async (int id, int batchId, BudgetDbContext db,
+            AccountService svc, CancellationToken ct) =>
+        {
+            var a = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (a is null) return Results.NotFound();
+            try { return Results.Ok(await svc.UndoAsync(a, batchId, ct)); }
+            catch (ImportUndoException e) { return Results.Conflict(new { message = e.Message }); }
         });
     }
 

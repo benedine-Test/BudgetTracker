@@ -26,7 +26,13 @@ public record ImportPreview(
 
 public record ImportRowIn(DateOnly Date, string Description, decimal Amount, bool IsCredit, bool IsSalary);
 
-public record ImportResult(int Added, int Linked, int SalariesRecorded, decimal Balance, string Message);
+public record ImportResult(int Added, int Linked, int SalariesRecorded, decimal Balance, string Message, int BatchId = 0);
+
+public record ImportBatchView(int Id, DateTimeOffset CreatedAt, string? FileName, int Added, int Linked,
+    bool ResetBalance, DateTimeOffset? UndoneAt, bool CanUndo);
+
+/// <summary>Thrown for an undo that can't be done safely; the message is for the person.</summary>
+public class ImportUndoException(string message) : Exception(message);
 
 public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetService budgets,
     TransactionService transactions, Clock clock)
@@ -190,15 +196,33 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
     }
 
     public async Task<ImportResult> CommitAsync(Account account, IReadOnlyList<ImportRowIn> add, IReadOnlyList<int> link,
-        decimal? statementBalance, DateOnly? statementBalanceDate, CancellationToken ct = default)
+        decimal? statementBalance, DateOnly? statementBalanceDate, CancellationToken ct = default, string? fileName = null)
     {
+        var tracked = await db.Accounts.SingleAsync(a => a.Id == account.Id, ct);
+        var batch = new ImportBatch
+        {
+            AccountId = account.Id,
+            CreatedAtUtc = clock.UtcNow,
+            FileName = fileName is { Length: > 200 } ? fileName[..200] : fileName,
+            PreviousAnchorBalance = tracked.AnchorBalance,
+            PreviousBalanceAsOfUtc = tracked.BalanceAsOfUtc,
+            PreviousLastImportAtUtc = tracked.LastImportAtUtc
+        };
+        db.ImportBatches.Add(batch);
+        await db.SaveChangesAsync(ct);
+
         var linked = 0;
+        var linkedIds = new List<int>();
         if (link.Count > 0)
         {
             var toLink = await db.Transactions.Where(t => link.Contains(t.Id)).ToListAsync(ct);
             foreach (var t in toLink.Where(t => t.AccountId is null || t.AccountId == account.Id))
             {
-                if (t.AccountId is null) linked++;
+                if (t.AccountId is null)
+                {
+                    linked++;
+                    linkedIds.Add(t.Id);
+                }
                 t.AccountId = account.Id;
                 var tag = nameof(TransactionSource.StatementImport);
                 if (t.Source != TransactionSource.StatementImport && (t.MergedSources is null || !t.MergedSources.Contains(tag)))
@@ -216,7 +240,9 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             var description = r.Description.Trim();
             if (r.IsCredit && r.IsSalary)
             {
-                await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id, TransactionSource.StatementImport, ct);
+                var (salaryTx, _) = await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id, TransactionSource.StatementImport, ct);
+                salaryTx.ImportBatchId = batch.Id;
+                await db.SaveChangesAsync(ct);
                 salaries++;
                 added++;
                 continue;
@@ -232,6 +258,7 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
                 Merchant = description.Length > 200 ? description[..200] : description,
                 Source = TransactionSource.StatementImport,
                 AccountId = account.Id,
+                ImportBatchId = batch.Id,
                 CategoryId = await GuessCategoryAsync(row, ct),
                 Notes = "From statement"
             };
@@ -241,14 +268,18 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             added++;
         }
 
-        var tracked = await db.Accounts.SingleAsync(a => a.Id == account.Id, ct);
-        tracked.LastImportAtUtc = clock.UtcNow;
+        tracked.LastImportAtUtc = batch.CreatedAtUtc;
         if (statementBalance is { } bal && statementBalanceDate is { } day)
         {
             // The statement is the truth: start counting again from its closing balance.
             tracked.AnchorBalance = bal;
             tracked.BalanceAsOfUtc = EndOfDayUtc(day);
+            batch.ResetBalance = true;
+            batch.SetBalanceAsOfUtc = tracked.BalanceAsOfUtc;
+            batch.SetAnchorBalance = tracked.AnchorBalance;
         }
+        batch.Added = added;
+        batch.LinkedIds = linkedIds.Count == 0 ? null : string.Join(',', linkedIds);
         await db.SaveChangesAsync(ct);
 
         var balance = await BalanceAsync(tracked, ct);
@@ -257,7 +288,70 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         if (linked > 0) parts.Add($"filed {linked} existing under {account.Name}");
         if (salaries > 0) parts.Add("salary recorded");
         return new ImportResult(added, linked, salaries, balance,
-            $"{string.Join(", ", parts)}. Balance now {TransactionService.Money(balance, account.Currency)}.");
+            $"{string.Join(", ", parts)}. Balance now {TransactionService.Money(balance, account.Currency)}.", batch.Id);
+    }
+
+    public async Task<IReadOnlyList<ImportBatchView>> ImportsAsync(int accountId, CancellationToken ct = default)
+    {
+        var batches = await db.ImportBatches.AsNoTracking().Where(b => b.AccountId == accountId)
+            .OrderByDescending(b => b.Id).Take(20).ToListAsync(ct);
+        var latestLive = batches.FirstOrDefault(b => b.UndoneAtUtc is null)?.Id;
+        return batches.Select(b => new ImportBatchView(b.Id, Local(b.CreatedAtUtc), b.FileName, b.Added,
+            b.LinkedIds?.Split(',').Length ?? 0, b.ResetBalance,
+            b.UndoneAtUtc is { } u ? Local(u) : null, b.Id == latestLive)).ToList();
+    }
+
+    /// <summary>
+    /// Takes a statement import back out: removes the entries it added (and the budget a salary
+    /// line opened), unfiles the entries it filed, and puts the balance back the way it was.
+    /// Only the latest import of an account can be undone, so undos never tangle with each other.
+    /// Bus/MRT taps that an imported fare replaced stay gone; they were S$0 placeholders.
+    /// </summary>
+    public async Task<ImportResult> UndoAsync(Account account, int batchId, CancellationToken ct = default)
+    {
+        var batch = await db.ImportBatches.FirstOrDefaultAsync(b => b.Id == batchId && b.AccountId == account.Id, ct)
+                    ?? throw new ImportUndoException("That import isn't on this account.");
+        if (batch.UndoneAtUtc is not null) throw new ImportUndoException("That import was already undone.");
+        var newer = await db.ImportBatches.AnyAsync(b => b.AccountId == account.Id && b.Id > batch.Id && b.UndoneAtUtc == null, ct);
+        if (newer) throw new ImportUndoException("Undo the newer import first — only the latest one can be undone.");
+
+        var added = await db.Transactions.Include(t => t.Category).Where(t => t.ImportBatchId == batch.Id).ToListAsync(ct);
+        foreach (var t in added.Where(t => t.IsIncome && t.Category?.Name == "Salary"))
+            await budgets.ReverseSalaryAsync(t, ct);
+        db.Transactions.RemoveRange(added);
+
+        var ids = (batch.LinkedIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToList();
+        if (ids.Count > 0)
+        {
+            var tag = nameof(TransactionSource.StatementImport);
+            foreach (var t in await db.Transactions.Where(t => ids.Contains(t.Id) && t.AccountId == account.Id).ToListAsync(ct))
+            {
+                t.AccountId = null;
+                var rest = (t.MergedSources ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Where(s => s != tag).ToList();
+                t.MergedSources = rest.Count == 0 ? null : string.Join(',', rest);
+            }
+        }
+
+        var tracked = await db.Accounts.SingleAsync(a => a.Id == account.Id, ct);
+        var keptManualBalance = false;
+        if (batch.ResetBalance)
+        {
+            if (tracked.BalanceAsOfUtc == batch.SetBalanceAsOfUtc && tracked.AnchorBalance == batch.SetAnchorBalance)
+            {
+                tracked.AnchorBalance = batch.PreviousAnchorBalance;
+                tracked.BalanceAsOfUtc = batch.PreviousBalanceAsOfUtc;
+            }
+            else keptManualBalance = true; // set by hand after the import: that's newer information
+        }
+        tracked.LastImportAtUtc = batch.PreviousLastImportAtUtc;
+        batch.UndoneAtUtc = clock.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        var balance = await BalanceAsync(tracked, ct);
+        var message = $"Import undone: removed {added.Count} {(added.Count == 1 ? "entry" : "entries")}. " +
+                      $"Balance now {TransactionService.Money(balance, tracked.Currency)}." +
+                      (keptManualBalance ? " The balance you set by hand after it was kept." : "");
+        return new ImportResult(-added.Count, -ids.Count, 0, balance, message, batch.Id);
     }
 
     /// <summary>

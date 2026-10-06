@@ -144,6 +144,25 @@ else
             }
         }
 
+        <h3 class="group-title">Fix this entry</h3>
+        <form @onsubmit="SaveEdit" @onsubmit:preventDefault>
+            <label for="ed-amount">Amount (@selected.Currency)</label>
+            <input id="ed-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="editAmount" />
+            <label for="ed-merchant">Shop or description</label>
+            <input id="ed-merchant" type="text" @bind="editMerchant" />
+            <label for="ed-when">When</label>
+            <input id="ed-when" type="datetime-local" @bind="editWhen" @bind:format="yyyy-MM-ddTHH:mm" />
+            @if (selected.IsIncome && selected.Category == "Salary")
+            {
+                <p class="hint">Salary set this period's budget. To change its amount or date, delete it and record it again.</p>
+            }
+            @if (editError is not null)
+            {
+                <p class="field-error" role="alert">@editError</p>
+            }
+            <button type="submit" class="btn" disabled="@busy">Save changes</button>
+        </form>
+
         <button type="button" class="btn danger block" disabled="@busy" @onclick="Delete">
             @(confirmDelete ? "Tap again to delete for good" : "Delete this entry")
         </button>
@@ -226,6 +245,10 @@ else
     private TransactionDto? selected;
     private bool learn = true;
     private bool confirmDelete;
+    private decimal? editAmount;
+    private string editMerchant = "";
+    private DateTime editWhen;
+    private string? editError;
     private bool busy;
 
     private bool adding;
@@ -314,6 +337,34 @@ else
         }
     }
 
+    private async Task SaveEdit()
+    {
+        if (selected is null || busy) return;
+        if (editAmount is not > 0) { editError = "Enter an amount above zero."; return; }
+        if (string.IsNullOrWhiteSpace(editMerchant)) { editError = "Enter the shop or a description."; return; }
+
+        busy = true;
+        editError = null;
+        try
+        {
+            // Entries are shown in Singapore time, so the edited time is Singapore time too.
+            var when = new DateTimeOffset(DateTime.SpecifyKind(editWhen, DateTimeKind.Unspecified), TimeSpan.FromHours(8));
+            selected = await Api.UpdateTransaction(selected.Id, editAmount.Value, editMerchant.Trim(),
+                when.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture));
+            Toast.Show("Saved.");
+            selected = null;
+            await Load();
+        }
+        catch (ApiException e)
+        {
+            editError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
     private async Task SearchChanged(ChangeEventArgs e)
     {
         search = e.Value?.ToString() ?? "";
@@ -332,6 +383,10 @@ else
         selected = t;
         learn = true;
         confirmDelete = false;
+        editAmount = t.Amount == 0 ? null : t.Amount;
+        editMerchant = t.Merchant;
+        editWhen = t.OccurredAt.DateTime;
+        editError = null;
     }
 
     private void OpenAdd()

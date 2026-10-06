@@ -71,6 +71,60 @@ public static class SchemaUpgrade
                         "CREATE INDEX \"IX_Transactions_AccountId\" ON \"Transactions\" (\"AccountId\");", ct);
                 }
             }
+
+            // ---- Undoable statement imports (ImportBatches table + Transactions.ImportBatchId) ----
+            if (!await TableExistsAsync(conn, "ImportBatches", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [ImportBatches] (
+                          [Id] int NOT NULL IDENTITY,
+                          [AccountId] int NOT NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          [FileName] nvarchar(200) NULL,
+                          [Added] int NOT NULL,
+                          [LinkedIds] nvarchar(max) NULL,
+                          [ResetBalance] bit NOT NULL,
+                          [PreviousAnchorBalance] decimal(18,2) NOT NULL,
+                          [PreviousBalanceAsOfUtc] datetime2 NOT NULL,
+                          [SetBalanceAsOfUtc] datetime2 NULL,
+                          [SetAnchorBalance] decimal(18,2) NULL,
+                          [PreviousLastImportAtUtc] datetime2 NULL,
+                          [UndoneAtUtc] datetime2 NULL,
+                          CONSTRAINT [PK_ImportBatches] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "ImportBatches" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_ImportBatches" PRIMARY KEY AUTOINCREMENT,
+                          "AccountId" INTEGER NOT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL,
+                          "FileName" TEXT NULL,
+                          "Added" INTEGER NOT NULL,
+                          "LinkedIds" TEXT NULL,
+                          "ResetBalance" INTEGER NOT NULL,
+                          "PreviousAnchorBalance" TEXT NOT NULL,
+                          "PreviousBalanceAsOfUtc" TEXT NOT NULL,
+                          "SetBalanceAsOfUtc" TEXT NULL,
+                          "SetAnchorBalance" TEXT NULL,
+                          "PreviousLastImportAtUtc" TEXT NULL,
+                          "UndoneAtUtc" TEXT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_ImportBatches_AccountId] ON [ImportBatches] ([AccountId]);"
+                    : "CREATE INDEX \"IX_ImportBatches_AccountId\" ON \"ImportBatches\" (\"AccountId\");", ct);
+            }
+
+            if (!await ColumnExistsAsync(conn, "Transactions", "ImportBatchId", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Transactions] ADD [ImportBatchId] int NULL;"
+                    : "ALTER TABLE \"Transactions\" ADD COLUMN \"ImportBatchId\" INTEGER NULL;", ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_Transactions_ImportBatchId] ON [Transactions] ([ImportBatchId]);"
+                    : "CREATE INDEX \"IX_Transactions_ImportBatchId\" ON \"Transactions\" (\"ImportBatchId\");", ct);
+            }
         }
         finally
         {

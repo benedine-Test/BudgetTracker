@@ -37,7 +37,10 @@ public record ImportPreview(List<string> Headers, ColumnMap Columns, bool Positi
 
 public record ImportRowIn(DateOnly Date, string Description, decimal Amount, bool IsCredit, bool IsSalary);
 
-public record ImportResult(int Added, int Linked, int SalariesRecorded, decimal Balance, string Message);
+public record ImportResult(int Added, int Linked, int SalariesRecorded, decimal Balance, string Message, int BatchId);
+
+public record ImportBatchView(int Id, DateTimeOffset CreatedAt, string? FileName, int Added, int Linked,
+    bool ResetBalance, DateTimeOffset? UndoneAt, bool CanUndo);
 
 public record CategoryDto(int Id, string Name, string Bucket, bool IsArchived);
 
@@ -97,6 +100,13 @@ public class Api(HttpClient http)
     public Task AddSpend(decimal amount, string merchant, int? categoryId, string date, string? notes, int? accountId) =>
         Send(HttpMethod.Post, "api/transactions", new { amount, merchant, categoryId, date, notes, accountId });
 
+    /// <summary>Fix an entry's amount, description or date (ISO with offset).</summary>
+    public async Task<TransactionDto> UpdateTransaction(int id, decimal amount, string merchant, string date)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/transactions/{id}", new { amount, merchant, date });
+        return (await r.Content.ReadFromJsonAsync<TransactionDto>(Json))!;
+    }
+
     /// <summary>accountId 0 takes the entry off its account.</summary>
     public async Task<TransactionDto> MoveToAccount(int id, int accountId)
     {
@@ -141,8 +151,17 @@ public class Api(HttpClient http)
     public Task<ImportPreview> PreviewPdf(int id, string pdfBase64, string? password, bool? positiveIsSpend) =>
         Post<ImportPreview>($"api/accounts/{id}/import/preview", new { pdf = pdfBase64, password, positiveIsSpend });
 
-    public Task<ImportResult> CommitImport(int id, List<ImportRowIn> add, List<int> link, decimal? statementBalance, DateOnly? statementBalanceDate) =>
-        Post<ImportResult>($"api/accounts/{id}/import", new { add, link, statementBalance, statementBalanceDate });
+    public Task<ImportResult> CommitImport(int id, List<ImportRowIn> add, List<int> link, decimal? statementBalance,
+        DateOnly? statementBalanceDate, string? fileName) =>
+        Post<ImportResult>($"api/accounts/{id}/import", new { add, link, statementBalance, statementBalanceDate, fileName });
+
+    public Task<List<ImportBatchView>> Imports(int id) => Get<List<ImportBatchView>>($"api/accounts/{id}/imports");
+
+    public async Task<ImportResult> UndoImport(int id, int batchId)
+    {
+        using var r = await Send(HttpMethod.Delete, $"api/accounts/{id}/imports/{batchId}");
+        return (await r.Content.ReadFromJsonAsync<ImportResult>(Json))!;
+    }
 
     // ---- Categories ----
     public Task<List<CategoryDto>> Categories() => Get<List<CategoryDto>>("api/categories");

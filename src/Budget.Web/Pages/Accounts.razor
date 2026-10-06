@@ -52,7 +52,7 @@ else
     <div class="card rows">
         @foreach (var a in s.Accounts)
         {
-            <button type="button" class="row tx" @onclick="() => Open(a)">
+            <button type="button" class="row tx" @onclick="async () => await Open(a)">
                 <span class="row-main">
                     <span class="tx-name">@a.Name</span>
                     <span class="muted">@KindLabel(a.Kind) · @Freshness(a)</span>
@@ -107,6 +107,36 @@ else
 
         <button type="button" class="btn primary block" @onclick="StartImport">Import a statement</button>
         <a class="btn block" href="@($"transactions?account={selected.Id}")">See its entries</a>
+
+        @if (imports.Count > 0)
+        {
+            <h3 class="group-title">Imports</h3>
+            <div class="rows imp">
+                @foreach (var b in imports.Take(5))
+                {
+                    <div class="row static imp-row">
+                        <span class="row-main">
+                            <span class="tx-name">@(b.FileName ?? "Statement")</span>
+                            <span class="muted small">
+                                @b.CreatedAt.ToString("d MMM, h:mm tt", System.Globalization.CultureInfo.InvariantCulture) ·
+                                @b.Added added@(b.Linked > 0 ? $", {b.Linked} filed" : "")@(b.ResetBalance ? ", balance reset" : "")
+                            </span>
+                        </span>
+                        @if (b.UndoneAt is not null)
+                        {
+                            <span class="muted small">Undone</span>
+                        }
+                        else if (b.CanUndo)
+                        {
+                            <button type="button" class="btn small @(confirmUndo == b.Id ? "danger" : "")" disabled="@busy" @onclick="() => Undo(b)">
+                                @(confirmUndo == b.Id ? "Tap again" : "Undo")
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            <p class="hint">Undo takes the import's entries back out and puts the balance back. Handy after a test import — fix things and import again.</p>
+        }
 
         <h3 class="group-title">Correct the balance</h3>
         <form @onsubmit="SaveBalance" @onsubmit:preventDefault>
@@ -312,6 +342,9 @@ else
     private decimal? fixBalance;
 
     private bool importing;
+    private string? fileName;
+    private List<ImportBatchView> imports = [];
+    private int? confirmUndo;
     private string? csv;
     private string? pdf;            // base64, kept so a password or "swap" can re-read it
     private string? pdfPassword;
@@ -333,7 +366,7 @@ else
             s = await Api.Accounts(archived: true);
             if (Import is int id && s.Accounts.FirstOrDefault(a => a.Id == id) is { } a)
             {
-                Open(a);
+                await Open(a);
                 StartImport();
                 Import = null;
             }
@@ -374,9 +407,11 @@ else
         formError = null;
     }
 
-    private void Open(AccountDto a)
+    private async Task Open(AccountDto a)
     {
         selected = a;
+        imports = [];
+        confirmUndo = null;
         importing = false;
         confirmDelete = false;
         formName = a.Name;
@@ -384,6 +419,21 @@ else
         formCards = a.CardNames;
         formError = null;
         fixBalance = a.Kind == "CreditCard" ? -a.Balance : a.Balance;
+        try { imports = await Api.Imports(a.Id); }
+        catch (ApiException) { /* the sheet works without the history */ }
+    }
+
+    private async Task Undo(ImportBatchView b)
+    {
+        if (selected is null || busy) return;
+        if (confirmUndo != b.Id) { confirmUndo = b.Id; return; }
+        await Run(async () =>
+        {
+            var result = await Api.UndoImport(selected.Id, b.Id);
+            Toast.Show(result.Message);
+            selected = null;
+            await Load();
+        });
     }
 
     private void CloseSheets()
@@ -488,6 +538,7 @@ else
         busy = true;
         try
         {
+            fileName = e.File.Name;
             await using var stream = e.File.OpenReadStream(MaxFile);
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer);
@@ -551,8 +602,8 @@ else
         await Run(async () =>
         {
             var result = await Api.CommitImport(selected.Id, add, link,
-                setBalance ? preview.StatementBalance : null, setBalance ? preview.StatementBalanceDate : null);
-            Toast.Show(result.Message);
+                setBalance ? preview.StatementBalance : null, setBalance ? preview.StatementBalanceDate : null, fileName);
+            Toast.Show(result.Message + " Something wrong? Undo it from the account.");
             CloseSheets();
             await Load();
         });
