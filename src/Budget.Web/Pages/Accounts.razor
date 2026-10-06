@@ -49,6 +49,16 @@ else
         </a>
     }
 
+    @if (s.OwedToYou > 0)
+    {
+        <a class="card banner" href="transactions?filter=shared">
+            <span>
+                <strong>Friends owe you @Fmt.Money(s.OwedToYou)</strong>
+                <span class="muted">For bills you paid for them too. Not in the total until it's paid back.</span>
+            </span>
+        </a>
+    }
+
     <div class="card rows">
         @foreach (var a in s.Accounts)
         {

@@ -18,20 +18,36 @@ public record IncomeCreate(decimal Amount, string? Date, string? Note, string? K
 /// <summary>AccountId 0 takes the entry off its account.</summary>
 public record TransactionUpdate(decimal? Amount, string? Merchant, string? Date, string? Notes, int? CategoryId, int? AccountId);
 public record Categorise(int CategoryId, bool LearnRule = true, string? Pattern = null, bool ApplyToSimilar = true);
+/// <summary>MyShare null = the bill is all yours again.</summary>
+public record ShareUpdate(decimal? MyShare, string? SharedWith);
+/// <summary>Either an existing money-in entry (RepaymentId), or a new one to record (Amount, Date, AccountId, Note).</summary>
+public record RepaymentIn(int? RepaymentId, decimal? Amount, string? Date, int? AccountId, string? Note);
 
+/// <param name="Owed">On a shared bill: what's still owed back. Null when the bill isn't shared.</param>
 public record TransactionDto(
     int Id, DateTimeOffset OccurredAt, decimal Amount, string Currency, bool IsIncome,
     string Merchant, string? Card, string? Notes, string Source, string? MergedSources,
-    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account);
+    int? CategoryId, string? Category, string? Bucket, bool CategoryConfirmed, int? AccountId, string? Account,
+    decimal? MyShare = null, string? SharedWith = null, decimal? Owed = null, decimal Repaid = 0, int? RepaysId = null);
+
+public record OwedDto(TransactionDto Bill, decimal Owed, decimal Repaid);
+public record OwedList(decimal Total, IReadOnlyList<OwedDto> Bills);
 
 public static class TransactionEndpoints
 {
-    public static TransactionDto ToDto(Transaction t) => new(
+    public static TransactionDto ToDto(Transaction t) => ToDto(t, 0);
+
+    /// <param name="repaid">For a shared bill, the repayments linked to it so far.</param>
+    public static TransactionDto ToDto(Transaction t, decimal repaid) => new(
         t.Id,
         new DateTimeOffset(DateTime.SpecifyKind(t.OccurredAtUtc, DateTimeKind.Utc)).ToOffset(TimeSpan.FromHours(8)),
         t.Amount, t.Currency, t.IsIncome, t.Merchant, t.CardName, t.Notes,
         t.Source.ToString(), t.MergedSources, t.CategoryId, t.Category?.Name, t.Category?.Bucket.ToString(),
-        t.CategoryConfirmed, t.AccountId, t.Account?.Name);
+        t.CategoryConfirmed, t.AccountId, t.Account?.Name,
+        t.MyShare, t.SharedWith, t.MyShare is null ? null : SharedBills.Owed(t, repaid), repaid, t.RepaysId);
+
+    private static async Task<TransactionDto> ToDtoAsync(BudgetDbContext db, Transaction t, CancellationToken ct) =>
+        ToDto(t, t.MyShare is null ? 0 : (await SharedBills.RepaidAsync(db, [t.Id], ct)).GetValueOrDefault(t.Id));
 
     public static void MapTransactionEndpoints(this RouteGroupBuilder api)
     {
@@ -117,7 +133,7 @@ public static class TransactionEndpoints
 
         api.MapGet("/transactions", async (BudgetDbContext db, Clock clock,
             string? from, string? to, int? categoryId, string? bucket, bool? uncategorised, string? q, int? take,
-            int? accountId, CancellationToken ct) =>
+            int? accountId, bool? shared, CancellationToken ct) =>
         {
             var query = db.Transactions.AsNoTracking().Include(t => t.Category).Include(t => t.Account).AsQueryable();
 
@@ -136,6 +152,7 @@ public static class TransactionEndpoints
             if (categoryId is int cid) query = query.Where(t => t.CategoryId == cid);
             if (accountId is int aid) query = aid == 0 ? query.Where(t => t.AccountId == null) : query.Where(t => t.AccountId == aid);
             if (uncategorised == true) query = query.Where(t => t.CategoryId == null);
+            if (shared == true) query = query.Where(t => t.MyShare != null && !t.IsIncome);
             if (!string.IsNullOrWhiteSpace(bucket) && Enum.TryParse<Bucket>(bucket, true, out var b))
                 query = query.Where(t => t.Category != null && t.Category.Bucket == b);
             if (!string.IsNullOrWhiteSpace(q))
@@ -146,12 +163,13 @@ public static class TransactionEndpoints
 
             var rows = await query.OrderByDescending(t => t.OccurredAtUtc).ThenByDescending(t => t.Id)
                 .Take(Math.Clamp(take ?? 100, 1, 1000)).ToListAsync(ct);
-            return Results.Ok(rows.Select(ToDto));
+            var repaid = await SharedBills.RepaidAsync(db, rows.Where(t => t.MyShare != null).Select(t => t.Id), ct);
+            return Results.Ok(rows.Select(t => ToDto(t, repaid.GetValueOrDefault(t.Id))));
         });
 
         api.MapGet("/transactions/{id:int}", async (int id, BudgetDbContext db, CancellationToken ct) =>
             await db.Transactions.Include(t => t.Category).Include(t => t.Account).FirstOrDefaultAsync(t => t.Id == id, ct) is { } t
-                ? Results.Ok(ToDto(t)) : Results.NotFound());
+                ? Results.Ok(await ToDtoAsync(db, t, ct)) : Results.NotFound());
 
         api.MapPut("/transactions/{id:int}", async (int id, TransactionUpdate body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
         {
@@ -163,6 +181,19 @@ public static class TransactionEndpoints
             // A salary also set its pay period's budget; changing it here would leave that budget wrong.
             if (t.IsIncome && t.Category?.Name == "Salary" && (newAmount != t.Amount || newWhen != t.OccurredAtUtc))
                 return Results.BadRequest(new { message = "To change a salary, delete it and record it again so the budget updates too." });
+            if (newAmount != t.Amount && t.MyShare is decimal mine)
+            {
+                var repaid = (await SharedBills.RepaidAsync(db, [t.Id], ct)).GetValueOrDefault(t.Id);
+                if (newAmount < mine + repaid)
+                    return Results.BadRequest(new { message = $"This bill is shared: your share and what's been paid back come to {TransactionService.Money(mine + repaid, t.Currency)}. Lower your share first." });
+            }
+            if (newAmount != t.Amount && t.RepaysId is int billId
+                && await db.Transactions.AsNoTracking().FirstOrDefaultAsync(b => b.Id == billId, ct) is { MyShare: decimal billShare } bill)
+            {
+                var others = (await SharedBills.RepaidAsync(db, [billId], ct)).GetValueOrDefault(billId) - t.Amount;
+                if (billShare + others + newAmount > bill.Amount)
+                    return Results.BadRequest(new { message = "That's more than is owed on the bill it pays back. Unlink it first." });
+            }
             t.Amount = newAmount;
             t.OccurredAtUtc = newWhen;
             if (body.Merchant is not null)
@@ -187,7 +218,36 @@ public static class TransactionEndpoints
             }
             await db.SaveChangesAsync(ct);
             await LoadRefsAsync(db, t, ct);
-            return Results.Ok(ToDto(t));
+            return Results.Ok(await ToDtoAsync(db, t, ct));
+        });
+
+        // ---- Paying for friends ----
+        api.MapPut("/transactions/{id:int}/share", (int id, ShareUpdate body, SharedBills bills, BudgetDbContext db, CancellationToken ct) =>
+            Shared(db, () => bills.SetShareAsync(id, body.MyShare, body.SharedWith, ct), ct));
+
+        api.MapPost("/transactions/{id:int}/repayments", async (int id, RepaymentIn body, SharedBills bills, BudgetDbContext db,
+            Clock clock, CancellationToken ct) =>
+        {
+            if (body.RepaymentId is int rid) return await Shared(db, () => bills.LinkAsync(id, rid, ct), ct);
+            if (body.Amount is not decimal amount) return Results.BadRequest(new { message = "Enter how much was paid back." });
+            return await Shared(db, () => bills.RecordAsync(id, amount, clock.ParseToUtc(body.Date), body.AccountId, body.Note, ct), ct);
+        });
+
+        // On a repayment: it no longer pays back the bill, and is plain Other Income again.
+        api.MapDelete("/transactions/{id:int}/repays", (int id, SharedBills bills, BudgetDbContext db, CancellationToken ct) =>
+            Shared(db, () => bills.UnlinkAsync(id, ct), ct));
+
+        api.MapPost("/transactions/{id:int}/write-off", (int id, SharedBills bills, BudgetDbContext db, CancellationToken ct) =>
+            Shared(db, () => bills.WriteOffAsync(id, ct), ct));
+
+        // Bills with money still owed back; ?amount= puts the ones a repayment of that size fits first.
+        api.MapGet("/owed", async (decimal? amount, SharedBills bills, BudgetService budgets, CancellationToken ct) =>
+        {
+            var settings = await budgets.GetSettingsAsync(ct);
+            var open = await bills.OpenAsync(amount, ct);
+            return Results.Ok(new OwedList(
+                open.Where(o => o.Bill.Currency == settings.BaseCurrency).Sum(o => o.Owed),
+                open.Select(o => new OwedDto(ToDto(o.Bill, o.Repaid), o.Owed, o.Repaid)).ToList()));
         });
 
         // Categorise + teach: fixes this one, saves a rule, and re-files similar unconfirmed ones.
@@ -236,6 +296,8 @@ public static class TransactionEndpoints
             // A salary entry also fed a pay period's budget, so deleting it must take that back out.
             if (t.IsIncome && t.Category?.Name == "Salary")
                 await budgets.ReverseSalaryAsync(t, ct);
+            // A shared bill's repayments stay (the money did come in), as plain income.
+            await SharedBills.DetachRepaymentsAsync(db, [t.Id], ct);
 
             db.Transactions.Remove(t);
             await db.SaveChangesAsync(ct);
@@ -264,6 +326,20 @@ public static class TransactionEndpoints
             clock.ParseToUtc(body.Date), source, null, ct);
 
         return Results.Ok(new { message = result.Message, duplicate = result.WasDuplicate, transaction = ToDto(result.Transaction) });
+    }
+
+    private static async Task<IResult> Shared(BudgetDbContext db, Func<Task<Transaction>> change, CancellationToken ct)
+    {
+        try
+        {
+            var t = await change();
+            await LoadRefsAsync(db, t, ct);
+            return Results.Ok(await ToDtoAsync(db, t, ct));
+        }
+        catch (SharedBillException e)
+        {
+            return Results.BadRequest(new { message = e.Message });
+        }
     }
 
     private static async Task LoadRefsAsync(BudgetDbContext db, Transaction t, CancellationToken ct)
