@@ -1,0 +1,632 @@
+@page "/accounts"
+@inject Api Api
+@inject Toast Toast
+@inject NavigationManager Nav
+
+<PageTitle>Accounts</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Accounts</h1>
+    </div>
+    <button type="button" class="btn primary small" @onclick="OpenAdd">Add</button>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (s is null)
+{
+    <Loading />
+}
+else if (s.Accounts.Count == 0)
+{
+    <section class="card notice">
+        <h2>Track what's in the bank</h2>
+        <p>Add each bank account and card with the balance your banking app shows right now. From then on, every tap, alert and statement line keeps it up to date.</p>
+        <button type="button" class="btn primary" @onclick="OpenAdd">Add an account</button>
+    </section>
+}
+else
+{
+    <section class="card hero">
+        <span class="label">In your accounts</span>
+        <span class="big">@Fmt.Money(s.InAccounts)</span>
+        @if (s.OwedOnCards != 0)
+        {
+            <span class="sub">@Fmt.Money(s.OwedOnCards) owed on cards · @Fmt.Money(s.Net) after paying them</span>
+        }
+    </section>
+
+    @if (s.UnassignedSinceOldest > 0)
+    {
+        <a class="card banner" href="transactions?account=none">
+            <span>
+                <strong>@s.UnassignedSinceOldest @(s.UnassignedSinceOldest == 1 ? "entry isn't" : "entries aren't") filed under an account</strong>
+                <span class="muted">Balances can't include @(s.UnassignedSinceOldest == 1 ? "it" : "them") until you pick one. Add card names to an account to file taps automatically.</span>
+            </span>
+        </a>
+    }
+
+    <div class="card rows">
+        @foreach (var a in s.Accounts)
+        {
+            <button type="button" class="row tx" @onclick="async () => await Open(a)">
+                <span class="row-main">
+                    <span class="tx-name">@a.Name</span>
+                    <span class="muted">@KindLabel(a.Kind) · @Freshness(a)</span>
+                </span>
+                <span class="row-end">
+                    <span class="num @(a.Balance < 0 ? "neg" : "")">@BalanceText(a)</span>
+                </span>
+            </button>
+        }
+    </div>
+    <p class="hint center">Balances other than @s.Currency aren't in the total.</p>
+}
+
+@* ---------- Add ---------- *@
+@if (adding)
+{
+    <Sheet Title="Add account" OnClose="CloseSheets">
+        <form @onsubmit="SaveNew" @onsubmit:preventDefault>
+            <label for="acc-name">Name</label>
+            <input id="acc-name" type="text" autocapitalize="words" placeholder="e.g. DBS Multiplier" @bind="formName" />
+
+            <label for="acc-kind">Type</label>
+            <select id="acc-kind" @bind="formKind">
+                <option value="Bank">Bank account</option>
+                <option value="CreditCard">Credit card</option>
+                <option value="Cash">Cash / wallet</option>
+            </select>
+
+            <label for="acc-bal">@(formKind == "CreditCard" ? "Amount owed right now (S$)" : "Balance right now (S$)")</label>
+            <input id="acc-bal" type="number" inputmode="decimal" step="0.01" @bind="formBalance" />
+            <p class="hint">Copy it from your banking app. Everything after this moment is added on.</p>
+
+            <label for="acc-cards">Card names (optional)</label>
+            <input id="acc-cards" type="text" placeholder="e.g. DBS Visa Debit, PayLah" @bind="formCards" />
+            <p class="hint">As Apple Pay or the bank alert names the card. Taps on these cards are filed here by themselves. Separate with commas.</p>
+
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+        </form>
+    </Sheet>
+}
+
+@* ---------- One account ---------- *@
+@if (selected is not null && !importing)
+{
+    <Sheet Title="@selected.Name" OnClose="CloseSheets">
+        <p class="sheet-amount @(selected.Balance < 0 ? "neg" : "")">@BalanceText(selected)</p>
+        <p class="muted">@KindLabel(selected.Kind) · @Freshness(selected)</p>
+
+        <button type="button" class="btn primary block" @onclick="StartImport">Import a statement</button>
+        <a class="btn block" href="@($"transactions?account={selected.Id}")">See its entries</a>
+
+        @if (imports.Count > 0)
+        {
+            <h3 class="group-title">Imports</h3>
+            <div class="rows imp">
+                @foreach (var b in imports.Take(5))
+                {
+                    <div class="row static imp-row">
+                        <span class="row-main">
+                            <span class="tx-name">@(b.FileName ?? "Statement")</span>
+                            <span class="muted small">
+                                @b.CreatedAt.ToString("d MMM, h:mm tt", System.Globalization.CultureInfo.InvariantCulture) ·
+                                @b.Added added@(b.Linked > 0 ? $", {b.Linked} filed" : "")@(b.ResetBalance ? ", balance reset" : "")
+                            </span>
+                        </span>
+                        @if (b.UndoneAt is not null)
+                        {
+                            <span class="muted small">Undone</span>
+                        }
+                        else if (b.CanUndo)
+                        {
+                            <button type="button" class="btn small @(confirmUndo == b.Id ? "danger" : "")" disabled="@busy" @onclick="() => Undo(b)">
+                                @(confirmUndo == b.Id ? "Tap again" : "Undo")
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            <p class="hint">Undo takes the import's entries back out and puts the balance back. Handy after a test import — fix things and import again.</p>
+        }
+
+        <h3 class="group-title">Correct the balance</h3>
+        <form @onsubmit="SaveBalance" @onsubmit:preventDefault>
+            <label for="fix-bal">@(selected.Kind == "CreditCard" ? "What your bank says you owe now (S$)" : "What your bank shows now (S$)")</label>
+            <div class="inline">
+                <input id="fix-bal" type="number" inputmode="decimal" step="0.01" @bind="fixBalance" />
+                <button type="submit" class="btn" disabled="@busy">Set</button>
+            </div>
+            <p class="hint">Use this when it has drifted. A statement import usually closes the gap and shows you what was missing.</p>
+        </form>
+
+        <h3 class="group-title">Details</h3>
+        <form @onsubmit="SaveDetails" @onsubmit:preventDefault>
+            <label for="ed-name">Name</label>
+            <input id="ed-name" type="text" @bind="formName" />
+            <label for="ed-kind">Type</label>
+            <select id="ed-kind" @bind="formKind">
+                <option value="Bank">Bank account</option>
+                <option value="CreditCard">Credit card</option>
+                <option value="Cash">Cash / wallet</option>
+            </select>
+            <label for="ed-cards">Card names</label>
+            <input id="ed-cards" type="text" placeholder="e.g. DBS Visa Debit, PayLah" @bind="formCards" />
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn" disabled="@busy">Save details</button>
+        </form>
+
+        <button type="button" class="btn block" disabled="@busy" @onclick="Archive">
+            @(selected.IsArchived ? "Bring back" : "Archive (closed account)")
+        </button>
+        <button type="button" class="btn danger block" disabled="@busy" @onclick="Delete">
+            @(confirmDelete ? "Tap again — entries are kept, just unfiled" : "Delete this account")
+        </button>
+    </Sheet>
+}
+
+@* ---------- Import ---------- *@
+@if (selected is not null && importing)
+{
+    <Sheet Title="@($"Import into {selected.Name}")" OnClose="CloseSheets">
+        @if (preview is null || preview.Problem is not null)
+        {
+            <p class="muted">Pick the <strong>PDF statement</strong> your bank emails or lets you download, or a <strong>CSV</strong> transaction history if your bank offers one (more reliable). Excel files: save as CSV first. Scanned or photographed statements can't be read.</p>
+            <label for="imp-file">Statement file (.pdf or .csv)</label>
+            <InputFile id="imp-file" accept=".pdf,application/pdf,.csv,text/csv,.txt" OnChange="FilePicked" disabled="@busy" />
+            @if (busy)
+            {
+                <p class="hint">Reading…</p>
+            }
+
+            @if (preview?.Problem is { } problem)
+            {
+                <p class="field-error" role="alert">@problem</p>
+                @if (preview.NeedsPassword)
+                {
+                    <form @onsubmit="() => RunPreview(null)" @onsubmit:preventDefault>
+                        <label for="imp-pw">PDF password</label>
+                        <div class="inline">
+                            <input id="imp-pw" type="password" autocomplete="off" @bind="pdfPassword" />
+                            <button type="submit" class="btn" disabled="@busy">Open</button>
+                        </div>
+                        <p class="hint">Only used to open this file. It isn't saved.</p>
+                    </form>
+                }
+                @if (preview.Headers.Count > 0)
+                {
+                    <p class="hint">Point to the right columns and try again:</p>
+                    <div class="two">
+                        @foreach (var (key, label) in MapFields)
+                        {
+                            <div>
+                                <label for="@($"map-{key}")">@label</label>
+                                <select id="@($"map-{key}")" value="@(mapping.GetValueOrDefault(key) ?? "")" @onchange="e => mapping[key] = NullIfEmpty(e.Value?.ToString())">
+                                    <option value="">—</option>
+                                    @foreach (var h in preview.Headers.Where(h => h.Length > 0))
+                                    {
+                                        <option value="@h">@h</option>
+                                    }
+                                </select>
+                            </div>
+                        }
+                    </div>
+                    <button type="button" class="btn block" disabled="@busy" @onclick="() => RunPreview(null)">Try again</button>
+                }
+            }
+        }
+        else
+        {
+            var missing = preview.Rows.Count(r => r.Status != "matched");
+            <p>
+                <strong>@preview.Rows.Count lines.</strong>
+                @(preview.Rows.Count - missing) already in the app, <strong>@missing missing</strong>.
+            </p>
+            @if (preview.Warning is { } warning)
+            {
+                <p class="tag warn">@warning</p>
+            }
+            @if (pdf is not null)
+            {
+                <p class="hint">Read from a PDF — check the dates, amounts and + / − look right before adding.</p>
+            }
+            @if (preview.Columns.Amount is not null && preview.Columns.Debit is null && preview.Columns.Credit is null && preview.Columns.Direction is null)
+            {
+                <p class="hint">
+                    Reading positive amounts as @(preview.PositiveIsSpend ? "spending" : "money in").
+                    <button type="button" class="link" disabled="@busy" @onclick="() => RunPreview(!preview.PositiveIsSpend)">Backwards? Swap</button>
+                </p>
+            }
+
+            @if (preview.StatementBalance is { } bankBal && preview.StatementBalanceDate is { } bankDay)
+            {
+                var app = preview.AppBalanceThatDayAfterImport ?? 0;
+                var gap = bankBal - app;
+                <div class="card inset">
+                    <span class="muted">Bank's balance on @bankDay.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture)</span>
+                    <span class="num"><strong>@Fmt.Money(bankBal)</strong></span>
+                    <span class="muted">The app, after adding the ticked lines: @Fmt.Money(app)@(gap == 0 ? " — they agree." : $" ({Fmt.Signed(gap)} off)")</span>
+                    <label class="check">
+                        <input type="checkbox" @bind="useBankBalance" />
+                        <span>Set the balance to the bank's</span>
+                    </label>
+                </div>
+            }
+
+            <label class="check">
+                <input type="checkbox" @bind="showMatched" />
+                <span>Show lines already in the app</span>
+            </label>
+
+            <div class="rows imp">
+                @foreach (var r in preview.Rows.Where(r => showMatched || r.Status != "matched"))
+                {
+                    <div class="row static imp-row">
+                        @if (r.Status == "matched")
+                        {
+                            <span class="imp-check" aria-hidden="true">✓</span>
+                        }
+                        else
+                        {
+                            <input type="checkbox" class="imp-check" aria-label="@($"Add {r.Description}")"
+                                   checked="@picked.Contains(r.Index)" @onchange="e => Toggle(picked, r.Index, e)" />
+                        }
+                        <span class="row-main">
+                            <span class="tx-name">@r.Description</span>
+                            <span class="muted small">
+                                @r.Date.ToString("ddd d MMM", System.Globalization.CultureInfo.InvariantCulture)
+                                @if (r.Category is not null) { <span> · @r.Category</span> }
+                            </span>
+                            @if (r.Status == "matched")
+                            {
+                                <span class="muted small">In the app: @r.MatchText</span>
+                            }
+                            else if (r.Status == "check")
+                            {
+                                <span class="tag warn">@r.MatchText — same one?</span>
+                            }
+                            @if (r.IsCredit && r.Status != "matched")
+                            {
+                                <label class="check small">
+                                    <input type="checkbox" checked="@salary.Contains(r.Index)" @onchange="e => Toggle(salary, r.Index, e)" />
+                                    <span>This is my salary (sets the budget)</span>
+                                </label>
+                            }
+                        </span>
+                        <span class="num @(r.IsCredit ? "pos" : "")">@(r.IsCredit ? "+" : "")@Fmt.Money(r.Amount, selected.Currency)</span>
+                    </div>
+                }
+            </div>
+
+            <button type="button" class="btn primary block" disabled="@busy" @onclick="Commit">
+                @(busy ? "Saving…" : picked.Count == 0 ? (useBankBalance && preview.StatementBalance is not null ? "Just update the balance" : "Nothing to add") : $"Add {picked.Count} missing {(picked.Count == 1 ? "entry" : "entries")}")
+            </button>
+            <button type="button" class="btn block" disabled="@busy" @onclick="() => preview = null">Pick a different file</button>
+        }
+    </Sheet>
+}
+
+@code {
+    private const long MaxFile = 4 * 1024 * 1024;
+    private static readonly (string Key, string Label)[] MapFields =
+    [
+        ("date", "Date"), ("description", "Description"), ("debit", "Money out"),
+        ("credit", "Money in"), ("amount", "Amount (+/−)"), ("balance", "Balance")
+    ];
+
+    [SupplyParameterFromQuery] public int? Import { get; set; }
+
+    private AccountsSummary? s;
+    private string? error;
+    private bool busy;
+
+    private AccountDto? selected;
+    private bool adding;
+    private bool confirmDelete;
+    private string formName = "";
+    private string formKind = "Bank";
+    private decimal? formBalance;
+    private string? formCards;
+    private string? formError;
+    private decimal? fixBalance;
+
+    private bool importing;
+    private string? fileName;
+    private List<ImportBatchView> imports = [];
+    private int? confirmUndo;
+    private string? csv;
+    private string? pdf;            // base64, kept so a password or "swap" can re-read it
+    private string? pdfPassword;
+    private ImportPreview? preview;
+    private bool? positiveIsSpend;
+    private Dictionary<string, string?> mapping = new();
+    private HashSet<int> picked = [];
+    private HashSet<int> salary = [];
+    private bool showMatched;
+    private bool useBankBalance = true;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            s = await Api.Accounts(archived: true);
+            if (Import is int id && s.Accounts.FirstOrDefault(a => a.Id == id) is { } a)
+            {
+                await Open(a);
+                StartImport();
+                Import = null;
+            }
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "CreditCard" => "Credit card",
+        "Cash" => "Cash",
+        _ => "Bank account"
+    };
+
+    private static string BalanceText(AccountDto a) =>
+        a.Kind == "CreditCard" && a.Balance < 0 ? $"{Fmt.Money(-a.Balance, a.Currency)} owed" : Fmt.Money(a.Balance, a.Currency);
+
+    private static string Freshness(AccountDto a)
+    {
+        if (a.IsArchived) return "Archived";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return a.LastImportAt is { } li && li >= a.BalanceAsOf.AddDays(-1)
+            ? $"statement to {a.BalanceAsOf.AddDays(-1).ToString("d MMM", inv)}"
+            : $"balance set {a.BalanceAsOf.ToString("d MMM", inv)}";
+    }
+
+    private void OpenAdd()
+    {
+        selected = null;
+        adding = true;
+        formName = "";
+        formKind = "Bank";
+        formBalance = null;
+        formCards = null;
+        formError = null;
+    }
+
+    private async Task Open(AccountDto a)
+    {
+        selected = a;
+        imports = [];
+        confirmUndo = null;
+        importing = false;
+        confirmDelete = false;
+        formName = a.Name;
+        formKind = a.Kind;
+        formCards = a.CardNames;
+        formError = null;
+        fixBalance = a.Kind == "CreditCard" ? -a.Balance : a.Balance;
+        try { imports = await Api.Imports(a.Id); }
+        catch (ApiException) { /* the sheet works without the history */ }
+    }
+
+    private async Task Undo(ImportBatchView b)
+    {
+        if (selected is null || busy) return;
+        if (confirmUndo != b.Id) { confirmUndo = b.Id; return; }
+        await Run(async () =>
+        {
+            var result = await Api.UndoImport(selected.Id, b.Id);
+            Toast.Show(result.Message);
+            selected = null;
+            await Load();
+        });
+    }
+
+    private void CloseSheets()
+    {
+        adding = false;
+        selected = null;
+        importing = false;
+        preview = null;
+    }
+
+    private decimal SignedForKind(decimal entered) => formKind == "CreditCard" ? -Math.Abs(entered) : entered;
+
+    private async Task SaveNew()
+    {
+        if (busy) return;
+        if (string.IsNullOrWhiteSpace(formName)) { formError = "Give the account a name."; return; }
+        if (formBalance is null) { formError = "Enter the balance (0 is fine)."; return; }
+
+        await Run(async () =>
+        {
+            await Api.AddAccount(formName.Trim(), formKind, SignedForKind(formBalance.Value), formCards);
+            Toast.Show($"{formName.Trim()} added.");
+            adding = false;
+            await Load();
+        });
+    }
+
+    private async Task SaveBalance()
+    {
+        if (selected is null || busy || fixBalance is null) return;
+        var value = selected.Kind == "CreditCard" ? -Math.Abs(fixBalance.Value) : fixBalance.Value;
+        await Run(async () =>
+        {
+            await Api.SetBalance(selected.Id, value);
+            Toast.Show("Balance updated.");
+            selected = null;
+            await Load();
+        });
+    }
+
+    private async Task SaveDetails()
+    {
+        if (selected is null || busy) return;
+        if (string.IsNullOrWhiteSpace(formName)) { formError = "Give the account a name."; return; }
+        await Run(async () =>
+        {
+            await Api.UpdateAccount(selected.Id, formName.Trim(), formKind, formCards ?? "", null);
+            Toast.Show("Saved.");
+            selected = null;
+            await Load();
+        });
+    }
+
+    private async Task Archive()
+    {
+        if (selected is null || busy) return;
+        var archive = !selected.IsArchived;
+        await Run(async () =>
+        {
+            await Api.UpdateAccount(selected.Id, null, null, null, archive);
+            Toast.Show(archive ? $"{selected.Name} archived." : $"{selected.Name} is back.");
+            selected = null;
+            await Load();
+        });
+    }
+
+    private async Task Delete()
+    {
+        if (selected is null || busy) return;
+        if (!confirmDelete) { confirmDelete = true; return; }
+        await Run(async () =>
+        {
+            await Api.DeleteAccount(selected.Id);
+            Toast.Show("Account deleted. Its entries are still under Spending.");
+            selected = null;
+            await Load();
+        });
+    }
+
+    // ---- Import ----
+
+    private void StartImport()
+    {
+        importing = true;
+        preview = null;
+        csv = null;
+        pdf = null;
+        pdfPassword = null;
+        positiveIsSpend = null;
+        mapping = new();
+        showMatched = false;
+        useBankBalance = true;
+    }
+
+    private async Task FilePicked(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > MaxFile)
+        {
+            Toast.Error("That file is too big. Download a shorter date range (a few months at a time).");
+            return;
+        }
+        busy = true;
+        try
+        {
+            fileName = e.File.Name;
+            await using var stream = e.File.OpenReadStream(MaxFile);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            var bytes = buffer.ToArray();
+            var isPdf = bytes.Length > 4 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F';
+            pdf = isPdf ? Convert.ToBase64String(bytes) : null;
+            csv = isPdf ? null : new StreamReader(new MemoryStream(bytes)).ReadToEnd();
+            pdfPassword = null;
+        }
+        catch (IOException)
+        {
+            Toast.Error("Couldn't read that file. Try downloading it again.");
+            busy = false;
+            return;
+        }
+        busy = false;
+        positiveIsSpend = null;
+        mapping = new();
+        await RunPreview(null);
+    }
+
+    private async Task RunPreview(bool? flip)
+    {
+        if (selected is null || (csv is null && pdf is null)) return;
+        if (flip is not null) positiveIsSpend = flip;
+        ColumnMap? columns = mapping.Values.Any(v => v is not null)
+            ? new ColumnMap(mapping.GetValueOrDefault("date"),
+                mapping.GetValueOrDefault("description") is { } d ? [d] : null,
+                mapping.GetValueOrDefault("debit"), mapping.GetValueOrDefault("credit"),
+                mapping.GetValueOrDefault("amount"), null, mapping.GetValueOrDefault("balance"))
+            : null;
+
+        await Run(async () =>
+        {
+            preview = pdf is not null
+                ? await Api.PreviewPdf(selected.Id, pdf, string.IsNullOrEmpty(pdfPassword) ? null : pdfPassword, positiveIsSpend)
+                : await Api.PreviewImport(selected.Id, csv!, positiveIsSpend, columns);
+            picked = preview.Rows.Where(r => r.Status == "new").Select(r => r.Index).ToHashSet();
+            salary = preview.Rows.Where(r => r.SuggestSalary).Select(r => r.Index).ToHashSet();
+            positiveIsSpend = preview.PositiveIsSpend;
+            if (preview.Problem is null) mapping = new();
+        });
+    }
+
+    private static void Toggle(HashSet<int> set, int index, ChangeEventArgs e)
+    {
+        if (e.Value is true) set.Add(index);
+        else set.Remove(index);
+    }
+
+    private async Task Commit()
+    {
+        if (selected is null || preview is null || busy) return;
+        var add = preview.Rows.Where(r => picked.Contains(r.Index))
+            .Select(r => new ImportRowIn(r.Date, r.Description, r.Amount, r.IsCredit, r.IsCredit && salary.Contains(r.Index)))
+            .ToList();
+        var link = preview.Rows.Where(r => r.Status == "matched" && r.MatchId is not null).Select(r => r.MatchId!.Value).ToList();
+        var setBalance = useBankBalance && preview.StatementBalance is not null;
+        if (add.Count == 0 && !setBalance && link.Count == 0) { CloseSheets(); return; }
+
+        await Run(async () =>
+        {
+            var result = await Api.CommitImport(selected.Id, add, link,
+                setBalance ? preview.StatementBalance : null, setBalance ? preview.StatementBalanceDate : null, fileName);
+            Toast.Show(result.Message + " Something wrong? Undo it from the account.");
+            CloseSheets();
+            await Load();
+        });
+    }
+
+    private static string? NullIfEmpty(string? v) => string.IsNullOrEmpty(v) ? null : v;
+
+    private async Task Run(Func<Task> work)
+    {
+        busy = true;
+        formError = null;
+        try
+        {
+            await work();
+        }
+        catch (ApiException e)
+        {
+            if (adding || (selected is not null && !importing)) formError = e.Message;
+            else Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

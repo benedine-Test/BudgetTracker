@@ -96,7 +96,7 @@ svg { width: 22px; height: 22px; fill: currentColor; flex: none; }
 
 .tabbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-    display: grid; grid-template-columns: repeat(4, 1fr);
+    display: grid; grid-template-columns: repeat(5, 1fr);
     padding: 6px 8px calc(env(safe-area-inset-bottom) + 6px);
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
@@ -187,7 +187,18 @@ svg { width: 22px; height: 22px; fill: currentColor; flex: none; }
 .day-head h2 { font-size: 14px; color: var(--muted); font-weight: 600; }
 
 .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; align-self: flex-start; }
-.tag.warn { background: var(--warn-bg); color: var(--warn-text); }
+.tag.warn { background: var(--warn-bg); color: var(--warn-text); white-space: normal; }
+
+/* ---------- Accounts / statement import ---------- */
+.card.inset { background: var(--bg); box-shadow: none; gap: 4px; margin: 12px 0 4px; }
+.card.inset .check { margin: 8px 0 0; }
+.rows.imp { padding: 0; margin-top: 6px; }
+.imp-row { align-items: flex-start; padding: 10px 0; }
+.imp-check { width: 22px; height: 22px; flex: none; margin: 1px 0 0; accent-color: var(--accent); text-align: center; color: var(--savings); font-weight: 700; }
+.imp-row .tx-name { white-space: normal; overflow-wrap: anywhere; }
+.check.small { font-size: 13px; margin: 6px 0 0; }
+.check.small input { width: 18px; height: 18px; }
+a.btn.block { display: flex; }
 
 /* ---------- Controls ---------- */
 .btn {

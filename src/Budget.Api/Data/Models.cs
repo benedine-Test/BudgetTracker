@@ -18,6 +18,64 @@ public enum TransactionSource
     StatementImport = 3
 }
 
+public enum AccountKind
+{
+    Bank = 0,        // savings / current account
+    CreditCard = 1,  // balance goes negative as you spend: that's what you owe
+    Cash = 2         // wallet, prepaid
+}
+
+/// <summary>
+/// A bank account, card or wallet. Its balance is a known starting point (what the bank
+/// showed at <see cref="BalanceAsOfUtc"/>) plus every linked transaction after it, so a
+/// missed transaction shows up as a gap when you compare against the bank, and importing
+/// the statement fills it.
+/// </summary>
+public class Account
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public AccountKind Kind { get; set; }
+    public string Currency { get; set; } = "SGD";
+
+    /// <summary>What the bank said the balance was at <see cref="BalanceAsOfUtc"/>. Negative on a card = owed.</summary>
+    public decimal AnchorBalance { get; set; }
+    public DateTime BalanceAsOfUtc { get; set; }
+
+    /// <summary>
+    /// Comma-separated card names as Apple Pay / bank alerts report them ("DBS Altitude, PayLah").
+    /// Taps on a matching card are filed under this account automatically.
+    /// </summary>
+    public string? CardNames { get; set; }
+
+    public bool IsArchived { get; set; }
+    public DateTime? LastImportAtUtc { get; set; }
+}
+
+/// <summary>
+/// One statement import, kept so it can be undone: the entries it added carry its id, and it
+/// remembers which existing entries it filed and the balance it replaced.
+/// </summary>
+public class ImportBatch
+{
+    public int Id { get; set; }
+    public int AccountId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public string? FileName { get; set; }
+    public int Added { get; set; }
+    /// <summary>Existing entries this import filed under the account (comma-separated ids), unfiled again on undo.</summary>
+    public string? LinkedIds { get; set; }
+    /// <summary>Set when the import reset the balance: what it was before, restored on undo.</summary>
+    public bool ResetBalance { get; set; }
+    public decimal PreviousAnchorBalance { get; set; }
+    public DateTime PreviousBalanceAsOfUtc { get; set; }
+    /// <summary>The balance date this import set; if the balance was changed again since, undo leaves it.</summary>
+    public DateTime? SetBalanceAsOfUtc { get; set; }
+    public decimal? SetAnchorBalance { get; set; }
+    public DateTime? PreviousLastImportAtUtc { get; set; }
+    public DateTime? UndoneAtUtc { get; set; }
+}
+
 public class Category
 {
     public int Id { get; set; }
@@ -55,6 +113,13 @@ public class Transaction
     public string Merchant { get; set; } = "";
     public string? CardName { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Which account the money moved in. Null = not known yet (doesn't affect any balance).</summary>
+    public int? AccountId { get; set; }
+    public Account? Account { get; set; }
+
+    /// <summary>The statement import that added this entry, if any (see ImportBatch).</summary>
+    public int? ImportBatchId { get; set; }
 
     public TransactionSource Source { get; set; }
     /// <summary>Other sources that reported the same transaction and were merged into this one.</summary>

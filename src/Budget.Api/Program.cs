@@ -21,6 +21,7 @@ builder.Services.AddSingleton<Clock>();
 builder.Services.AddScoped<Categorizer>();
 builder.Services.AddScoped<BudgetService>();
 builder.Services.AddScoped<TransactionService>();
+builder.Services.AddScoped<AccountService>();
 
 builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -40,6 +41,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<BudgetDbContext>();
     // EnsureCreated is fine for v1. Switch to EF migrations before the schema needs to change on a live DB.
     await db.Database.EnsureCreatedAsync();
+    await SchemaUpgrade.ApplyAsync(db);
     await Seed.EnsureSeededAsync(db);
 }
 
@@ -59,6 +61,7 @@ var api = app.MapGroup("/api").AddEndpointFilter(async (ctx, next) =>
 
 api.MapTransactionEndpoints();
 api.MapBudgetEndpoints();
+api.MapAccountEndpoints();
 
 // Unknown /api paths are a 404, not the app page.
 app.Map("/api/{**rest}", () => Results.NotFound());

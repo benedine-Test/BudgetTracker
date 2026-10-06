@@ -37,9 +37,10 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
             Source = source,
             CategoryId = categoryId
         };
+        await LinkByCardAsync(tx, ct);
         db.Transactions.Add(tx);
         await db.SaveChangesAsync(ct);
-        await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
+        await LoadRefsAsync(tx, ct);
 
         return new IngestResult(tx, false, $"Trip at {tx.Merchant} logged. The fare is charged later and will show up then.");
     }
@@ -94,8 +95,9 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
             dup.MergedSources = string.IsNullOrEmpty(dup.MergedSources) ? source.ToString() : $"{dup.MergedSources},{source}";
             dup.CardName ??= cardName;
             if (string.IsNullOrWhiteSpace(dup.Merchant)) dup.Merchant = merchant;
+            await LinkByCardAsync(dup, ct);
             await db.SaveChangesAsync(ct);
-            await db.Entry(dup).Reference(t => t.Category).LoadAsync(ct);
+            await LoadRefsAsync(dup, ct);
             return new IngestResult(dup, true, $"Already logged: {Money(dup.Amount, dup.Currency)} at {dup.Merchant}.");
         }
 
@@ -110,12 +112,27 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
             Source = source,
             CategoryId = await categorizer.MatchAsync(merchant, ct)
         };
+        await LinkByCardAsync(tx, ct);
         db.Transactions.Add(tx);
         await AbsorbPendingFaresAsync(tx, ct);
         await db.SaveChangesAsync(ct);
-        await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
+        await LoadRefsAsync(tx, ct);
 
         return new IngestResult(tx, false, await BuildMessageAsync(tx, ct));
+    }
+
+    /// <summary>Files a tap under the account its card belongs to (see Account.CardNames). Call before SaveChanges.</summary>
+    public async Task LinkByCardAsync(Transaction tx, CancellationToken ct)
+    {
+        if (tx.AccountId is not null || string.IsNullOrWhiteSpace(tx.CardName)) return;
+        var accounts = await db.Accounts.AsNoTracking().Where(a => !a.IsArchived && a.CardNames != null).ToListAsync(ct);
+        tx.AccountId = AccountService.ForCard(accounts, tx.CardName)?.Id;
+    }
+
+    private async Task LoadRefsAsync(Transaction tx, CancellationToken ct)
+    {
+        await db.Entry(tx).Reference(t => t.Category).LoadAsync(ct);
+        await db.Entry(tx).Reference(t => t.Account).LoadAsync(ct);
     }
 
     /// <summary>One-line text for the iPhone notification after a tap.</summary>
@@ -140,5 +157,5 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
     }
 
     public static string Money(decimal amount, string currency) =>
-        currency == "SGD" ? $"S${amount:N2}" : $"{currency} {amount:N2}";
+        (amount < 0 ? "-" : "") + (currency == "SGD" ? $"S${Math.Abs(amount):N2}" : $"{currency} {Math.Abs(amount):N2}");
 }

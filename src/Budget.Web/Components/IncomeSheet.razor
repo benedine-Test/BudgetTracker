@@ -68,6 +68,18 @@
             <input id="inc-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
         }
 
+        @if (accounts.Count > 0)
+        {
+            <label for="inc-acc">Paid into</label>
+            <select id="inc-acc" @bind="accountId">
+                <option value="0">Not sure / skip</option>
+                @foreach (var a in accounts)
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+        }
+
         <label for="inc-date">Date received</label>
         <input id="inc-date" type="date" @bind="date" @bind:format="yyyy-MM-dd" />
 
@@ -96,6 +108,8 @@
     private string? note;
     private string? error;
     private bool busy;
+    private List<AccountDto> accounts = [];
+    private int accountId;
 
     // Base-pay mode. Remembered on this phone so payday is one number.
     private bool fromBase;
@@ -108,6 +122,14 @@
 
     protected override async Task OnInitializedAsync()
     {
+        try
+        {
+            // Pay usually lands in a bank account, so start with the first one.
+            accounts = (await Api.Accounts()).Accounts.Where(a => a.Kind != "CreditCard").ToList();
+            accountId = accounts.FirstOrDefault(a => a.Kind == "Bank")?.Id ?? 0;
+        }
+        catch (ApiException) { /* the sheet still works without accounts */ }
+
         try
         {
             fromBase = await JS.InvokeAsync<string?>("budget.getPref", "salaryFromBase") == "1";
@@ -150,7 +172,7 @@
         try
         {
             // Midday keeps the entry on the chosen date whatever the time zone handling.
-            await Api.RecordIncome(value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", saveNote);
+            await Api.RecordIncome(value, kind, Fmt.Iso(DateOnly.FromDateTime(date)) + "T12:00:00", saveNote, accountId == 0 ? null : accountId);
             if (kind == "salary") await RememberChoices();
             Toast.Show(kind == "salary" ? "Salary recorded. Budget updated." : "Income recorded.");
             await OnSaved.InvokeAsync();

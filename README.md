@@ -23,6 +23,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 
 - **Budget** — what's left from this pay, the three buckets with progress and a daily allowance, where the money went, and earlier pay periods.
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
+- **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
 - **Invest** — total value, gain/loss, mix by type, holdings. CPF and cash are entered as a single balance.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 
@@ -40,7 +41,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 | Bank card alert email (parsed elsewhere) | `POST /api/ingest/card-alert` | ✅ endpoint ready — parsers depend on your banks |
 | Manual entry | `POST /api/transactions` | ✅ ready |
 | Salary / other income | `POST /api/income` | ✅ ready |
-| Statement CSV import | — | ⏳ next, bank-specific |
+| Statement import (PDF or CSV) | `POST /api/accounts/{id}/import[/preview]` | ✅ ready — any bank; PDF needs a real (not scanned) statement |
 
 **De-duplication.** If the Shortcut and a bank email both report the same purchase (same amount + currency, within 30 min, similar merchant), the second one is merged, not doubled. Two identical taps from the *same* source are kept as two — two coffees are two coffees.
 
@@ -50,6 +51,33 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 - Each period keeps the split that was set when it opened, so changing 50/30/20 → 60/20/20 doesn't rewrite past months.
 
 **Categorisation.** About 60 seeded rules for common Singapore merchants (FairPrice, BUS/MRT, GrabFood vs Grab, SP Services…). When you correct one with `POST /api/transactions/{id}/categorise`, it learns a rule (e.g. `HANAMI RAMEN`) and re-files other unconfirmed matches.
+
+## Bank accounts and statement import
+
+**Balances.** Add each account with the balance your banking app shows *right now* (cards: the amount owed). From that moment every linked entry moves it: spending takes it down, money in puts it up. A card's balance goes negative as you spend — that's what you owe.
+
+**Which account an entry belongs to.**
+- Apple Pay taps and bank alerts: give the account its **card names** as Apple Pay reports them (e.g. `DBS Visa Debit, PayLah`). Matching taps are filed there automatically, including ones already recorded.
+- Added by hand / salary: pick the account in the form.
+- Anything else: open it under Spending and choose the account. Accounts shows a banner while entries are unfiled.
+
+**Importing a statement** (Accounts → an account → Import a statement):
+1. Pick the **PDF statement** (the one your bank emails or lets you download) or a **CSV transaction history**. No per-bank setup for either:
+   - **PDF:** reads the text, takes lines that start with a date and end with amounts, and uses the column headings (Withdrawal / Deposit / Balance, or Amount with `CR` on credits) to tell money out from money in. Wrapped descriptions are joined; balance brought/carried forward, totals and page footers are skipped; dates without a year ("01 OCT") take the statement's year (December lines on a January statement go to the year before). Where there's a running balance, every line is checked against it and the preview warns if any don't add up. Password-protected PDFs ask for the password (used once, never stored). Scanned/photographed statements have no text and can't be read.
+   - **CSV:** finds the header row and works out the date, description, money out / money in (or a signed amount, or DR/CR markers) and balance columns. Dates are read day-first. If it can't tell, it asks you to point at the columns.
+   CSV is the more reliable of the two where your bank offers it.
+2. It shows each line as **already in the app** or **missing**. A purchase matches an existing entry with the same amount up to 5 days earlier (banks post card taps 1–3 days late); each entry is used once, so two identical coffees need two entries. Entries already filed under a *different* account are never matched.
+3. Untick anything you don't want, tick **This is my salary** on a pay credit to open the budget period, and add.
+4. If the file has a balance column, it compares the bank's closing balance with the app's and offers to reset to the bank's figure — the bank is the truth.
+5. **Wrong, or just a test?** The account lists its recent imports with **Undo**: the import's entries are removed (a salary line's budget too), entries it filed are unfiled, and the balance goes back to what it was — unless you've set the balance by hand since, which is kept. Only the latest import of an account can be undone (undo newer ones first). Then fix things and import again. Imports made before this feature existed can't be undone.
+
+**Fixing an entry.** Tap any entry under Spending → *Fix this entry* to change its amount, description or date. A salary's amount or date can't be edited there (it set the period's budget) — delete it and record it again.
+
+What it does for you: card bill payments ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD") are filed as **Transfer** so they don't count as spending twice; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
+
+Limits: scanned PDFs can't be read; Excel files must be saved as CSV first. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
+
+**Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -88,7 +116,7 @@ Things to check in your first week:
 | GET | `/api/budget/history` | Budget vs actual for each recorded pay period |
 | GET | `/api/budget/periods` | All pay periods |
 | GET/PUT | `/api/settings` | `payDay`, `needsPct`, `wantsPct`, `savingsPct` (must total 100) |
-| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take` |
+| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled). PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
 | POST | `/api/transactions/{id}/categorise` | `{categoryId, learnRule=true, pattern?, applyToSimilar=true}` |
 | DELETE | `/api/transactions/{id}` | |
 | GET/POST/PUT | `/api/categories[/{id}]` | Move a category between Needs / Wants / Savings / Income / Transfer |
@@ -97,6 +125,13 @@ Things to check in your first week:
 | POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase}` |
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
+| GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
+| POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
+| PUT | `/api/accounts/{id}/balance` | `{balance, asOf?}` — "the bank shows this now" |
+| POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |
+| POST | `/api/accounts/{id}/import` | `{add: [{date, description, amount, isCredit, isSalary}], link: [ids], statementBalance?, statementBalanceDate?, fileName?}` → includes `batchId` |
+| GET | `/api/accounts/{id}/imports` | Recent imports, newest first, with `canUndo` |
+| DELETE | `/api/accounts/{id}/imports/{batchId}` | Undo an import (latest only; 409 otherwise) |
 
 **Budget buckets.** Savings-bucket categories (Investments, Emergency Fund, Savings Goals) count as *contributions*, so you can see progress toward the 20%. Transfer and Income categories never count as spend.
 
@@ -111,11 +146,10 @@ Things to check in your first week:
 - **Cheaper:** a small container host (Fly.io, Railway) keeping SQLite on a persistent volume.
 - Either way: HTTPS only, and keep the key out of source control.
 
-**Before the schema changes on a live database,** switch `EnsureCreated` to EF migrations (`dotnet ef migrations add Initial`).
+**Schema changes on a live database** go in `Data/SchemaUpgrade.cs` (checked, idempotent SQL for SQLite and SQL Server), since `EnsureCreated` never alters an existing database. Moving to EF migrations is still the long-term fix, but needs a baseline for databases created by `EnsureCreated` and separate migrations per provider.
 
 ## Next steps
 
 1. Bank email parsers — depends on which banks and cards are used.
-2. Statement CSV import for reconciliation.
-3. Recurring bill / subscription detection.
-4. Automatic price and FX refresh.
+2. Recurring bill / subscription detection.
+3. Automatic price and FX refresh.
