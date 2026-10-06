@@ -41,7 +41,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 | Bank card alert email (parsed elsewhere) | `POST /api/ingest/card-alert` | ✅ endpoint ready — parsers depend on your banks |
 | Manual entry | `POST /api/transactions` | ✅ ready |
 | Salary / other income | `POST /api/income` | ✅ ready |
-| Statement import (PDF or CSV) | `POST /api/accounts/{id}/import[/preview]` | ✅ ready — any bank; PDF needs a real (not scanned) statement |
+| Statement import (PDF, CSV or Excel) | `POST /api/accounts/{id}/import[/preview]` | ✅ ready — any bank; PDF needs a real (not scanned) statement |
 
 **De-duplication.** If the Shortcut and a bank email both report the same purchase (same amount + currency, within 30 min, similar merchant), the second one is merged, not doubled. Two identical taps from the *same* source are kept as two — two coffees are two coffees.
 
@@ -62,10 +62,11 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 - Anything else: open it under Spending and choose the account. Accounts shows a banner while entries are unfiled.
 
 **Importing a statement** (Accounts → an account → Import a statement):
-1. Pick the **PDF statement** (the one your bank emails or lets you download) or a **CSV transaction history**. No per-bank setup for either:
+1. Pick the **PDF statement** (the one your bank emails or lets you download), or a **CSV or Excel (.xlsx / .xls) transaction history**. No per-bank setup for any of them:
    - **PDF:** reads the text, takes lines that start with a date and end with amounts, and uses the column headings (Withdrawal / Deposit / Balance, or Amount with `CR` on credits) to tell money out from money in. Wrapped descriptions are joined; balance brought/carried forward, totals and page footers are skipped; dates without a year ("01 OCT") take the statement's year (December lines on a January statement go to the year before). Where there's a running balance, every line is checked against it and the preview warns if any don't add up. Password-protected PDFs ask for the password (used once, never stored). Scanned/photographed statements have no text and can't be read.
    - **CSV:** finds the header row and works out the date, description, money out / money in (or a signed amount, or DR/CR markers) and balance columns. Dates are read day-first. If it can't tell, it asks you to point at the columns.
-   CSV is the more reliable of the two where your bank offers it.
+   - **Excel:** read the same way as CSV, using the first sheet that has transactions (summary sheets are skipped). Real date cells are read as dates, so Excel's display format can't flip day and month; dates typed as text are read day-first. Password-protected files ask for the password. A ".xls" that is really a text file is read as text; one that is really a web page has to be saved as .xlsx or CSV first.
+   CSV or Excel is more reliable than PDF where your bank offers it.
 2. It shows each line as **already in the app** or **missing**. A purchase matches an existing entry with the same amount up to 5 days earlier (banks post card taps 1–3 days late); each entry is used once, so two identical coffees need two entries. Entries already filed under a *different* account are never matched.
 3. Untick anything you don't want, tick **This is my salary** on a pay credit to open the budget period, and add.
 4. If the file has a balance column, it compares the bank's closing balance with the app's and offers to reset to the bank's figure — the bank is the truth.
@@ -75,7 +76,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 
 What it does for you: card bill payments are filed as **Transfer** so they don't count as spending twice — recognised by their wording ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD/DBSC"), and, when both the bank account and the card are in the app, by pairing money out of the bank with the same amount arriving on the card within 5 days, whatever the bank calls it and whichever statement you import first (undo puts the other side back). A card purchase never pairs with money coming into a bank account; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
 
-Limits: scanned PDFs can't be read; Excel files must be saved as CSV first. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
+Limits: scanned PDFs can't be read. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF or Excel file, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
 **Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
 
@@ -129,7 +130,7 @@ Things to check in your first week:
 | GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
 | PUT | `/api/accounts/{id}/balance` | `{balance, asOf?}` — "the bank shows this now" |
-| POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |
+| POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}`, `{excel: base64, password?, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |
 | POST | `/api/accounts/{id}/import` | `{add: [{date, description, amount, isCredit, isSalary}], link: [ids], statementBalance?, statementBalanceDate?, fileName?}` → includes `batchId` |
 | GET | `/api/accounts/{id}/imports` | Recent imports, newest first, with `canUndo` |
 | DELETE | `/api/accounts/{id}/imports/{batchId}` | Undo an import (latest only; 409 otherwise) |

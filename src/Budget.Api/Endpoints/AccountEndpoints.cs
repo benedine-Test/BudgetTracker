@@ -10,11 +10,12 @@ public record AccountUpdate(string? Name, AccountKind? Kind, string? CardNames, 
 public record BalanceSet(decimal Balance, string? AsOf);
 
 /// <summary>
-/// Send either Csv (the file's text) or Pdf (the file, base64) with its Password if it has one.
-/// PositiveIsSpend overrides the default for amounts with no in/out marking (CSV: true for cards,
-/// false for bank accounts; PDF: true). Columns overrides CSV column detection by heading name.
+/// Send Csv (the file's text), Pdf or Excel (the file, base64; .xlsx or .xls) with its Password if it has one.
+/// PositiveIsSpend overrides the default for amounts with no in/out marking (CSV and Excel: true for cards,
+/// false for bank accounts; PDF: true). Columns overrides CSV and Excel column detection by heading name.
 /// </summary>
-public record ImportPreviewRequest(string? Csv, bool? PositiveIsSpend, ColumnMap? Columns, string? Pdf = null, string? Password = null);
+public record ImportPreviewRequest(string? Csv, bool? PositiveIsSpend, ColumnMap? Columns, string? Pdf = null, string? Password = null,
+    string? Excel = null);
 
 /// <summary>
 /// Add = statement lines to create. Link = existing entries the statement confirmed, filed under
@@ -117,13 +118,25 @@ public static class AccountEndpoints
                 return Results.Ok(await svc.PreviewAsync(a, PdfStatementReader.Read(bytes, body.Password, spend), spend, ct));
             }
 
-            if (string.IsNullOrWhiteSpace(body.Csv)) return Results.BadRequest(new { message = "The file is empty." });
-            if (body.Csv.Length > StatementParser.MaxBytes)
-                return Results.BadRequest(new { message = "That file is too big. Download a shorter date range (a few months at a time)." });
-
             var positiveIsSpend = body.PositiveIsSpend ?? a.Kind == AccountKind.CreditCard;
-            var parsed = StatementParser.Parse(body.Csv, positiveIsSpend, body.Columns);
-            // In a CSV, a card's balance is shown the same way round as its amounts, so "swap" flips both.
+            ParsedStatement parsed;
+            if (!string.IsNullOrWhiteSpace(body.Excel))
+            {
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(body.Excel); }
+                catch (FormatException) { return Results.BadRequest(new { message = "That Excel file didn't arrive intact. Try again." }); }
+                if (bytes.Length > ExcelStatementReader.MaxBytes)
+                    return Results.BadRequest(new { message = "That file is too big. Download a shorter date range (a few months at a time)." });
+                parsed = ExcelStatementReader.Read(bytes, body.Password, positiveIsSpend, body.Columns);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(body.Csv)) return Results.BadRequest(new { message = "The file is empty." });
+                if (body.Csv.Length > StatementParser.MaxBytes)
+                    return Results.BadRequest(new { message = "That file is too big. Download a shorter date range (a few months at a time)." });
+                parsed = StatementParser.Parse(body.Csv, positiveIsSpend, body.Columns);
+            }
+            // In a CSV or sheet, a card's balance is shown the same way round as its amounts, so "swap" flips both.
             return Results.Ok(await svc.PreviewAsync(a, parsed, positiveIsSpend, ct, positiveBalanceIsOwed: positiveIsSpend));
         });
 

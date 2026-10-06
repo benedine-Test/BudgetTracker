@@ -52,11 +52,16 @@ public static partial class StatementParser
     {
         text = text.TrimStart('﻿');
         if (text.StartsWith("PK", StringComparison.Ordinal) || text.StartsWith("ÐÏ", StringComparison.Ordinal))
-            return Fail("This is an Excel file. Open it and save it as CSV, or download the CSV version from your bank.");
+            return Fail("This is an Excel file. Pick it again as .xlsx or .xls, or save it as CSV.");
         if (text.StartsWith("%PDF", StringComparison.Ordinal))
             return Fail("This is a PDF. PDF statements can't be read yet — download the transaction history as CSV from your bank instead.");
 
-        var lines = ReadCsv(text, DetectDelimiter(text));
+        return ParseLines(ReadCsv(text, DetectDelimiter(text)), positiveIsSpend, overrides);
+    }
+
+    /// <summary>Same as <see cref="Parse"/>, for rows already split into cells (a CSV, or an Excel sheet).</summary>
+    public static ParsedStatement ParseLines(List<List<string>> lines, bool positiveIsSpend, ColumnMap? overrides = null)
+    {
         if (lines.Count == 0) return Fail("The file is empty.");
 
         var headerIndex = FindHeader(lines, overrides);
@@ -131,10 +136,10 @@ public static partial class StatementParser
         var withBalance = (newestFirst ? rows : Enumerable.Reverse(rows)).FirstOrDefault(r => r.Balance is not null && r.Date == latest.Date);
 
         return new ParsedStatement(headers, map, rows, skipped, withBalance?.Balance, withBalance?.Date, null);
-
-        static ParsedStatement Fail(string message, IReadOnlyList<string>? headers = null, ColumnMap? map = null) =>
-            new(headers ?? [], map ?? new ColumnMap(), [], 0, null, null, message);
     }
+
+    private static ParsedStatement Fail(string message, IReadOnlyList<string>? headers = null, ColumnMap? map = null) =>
+        new(headers ?? [], map ?? new ColumnMap(), [], 0, null, null, message);
 
     // ---- Columns ----
 
