@@ -118,6 +118,14 @@ public static class SchemaUpgrade
                     : "CREATE INDEX \"IX_ImportBatches_AccountId\" ON \"ImportBatches\" (\"AccountId\");", ct);
             }
 
+            // Added after the table first shipped: a database upgraded in between has the table without it.
+            if (!await ColumnExistsAsync(conn, "ImportBatches", "Recategorised", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [ImportBatches] ADD [Recategorised] nvarchar(max) NULL;"
+                    : "ALTER TABLE \"ImportBatches\" ADD COLUMN \"Recategorised\" TEXT NULL;", ct);
+            }
+
             if (!await ColumnExistsAsync(conn, "Transactions", "ImportBatchId", sqlServer, ct))
             {
                 await db.Database.ExecuteSqlRawAsync(sqlServer

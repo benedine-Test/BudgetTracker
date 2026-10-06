@@ -540,4 +540,28 @@ public class SchemaUpgradeTests
         check.CommandText = """SELECT "Merchant" FROM "Transactions" WHERE "AccountId" IS NULL""";
         Assert.Equal("Starbucks", check.ExecuteScalar());
     }
+
+    [Fact]
+    public async Task Adds_the_recategorised_column_to_an_import_table_made_before_it_existed()
+    {
+        using var conn = new SqliteConnection("Data Source=:memory:");
+        conn.Open();
+        var options = new DbContextOptionsBuilder<BudgetDbContext>().UseSqlite(conn).Options;
+        using (var fresh = new BudgetDbContext(options))
+            await fresh.Database.EnsureCreatedAsync();
+        using (var cmd = conn.CreateCommand())
+        {
+            // As the first undoable-imports release created it.
+            cmd.CommandText = """ALTER TABLE "ImportBatches" DROP COLUMN "Recategorised";""";
+            cmd.ExecuteNonQuery();
+        }
+
+        using var db = new BudgetDbContext(options);
+        await SchemaUpgrade.ApplyAsync(db);
+        await SchemaUpgrade.ApplyAsync(db); // second run is a no-op
+
+        db.ImportBatches.Add(new ImportBatch { AccountId = 1, CreatedAtUtc = DateTime.UtcNow, Recategorised = "5:2" });
+        await db.SaveChangesAsync();
+        Assert.Equal("5:2", (await db.ImportBatches.AsNoTracking().SingleAsync()).Recategorised);
+    }
 }
