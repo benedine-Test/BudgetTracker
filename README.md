@@ -25,6 +25,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
 - **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance, and a salary recorded from base pay adds its CPF (yours and your employer's) to the CPF balance until you type in a new figure; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
+- **Total assets** (linked from Accounts and Invest) — bank and cash balances plus everything under Invest in one figure, with the mix, every item, and net worth after what's owed on cards.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
