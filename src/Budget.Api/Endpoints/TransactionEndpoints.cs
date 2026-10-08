@@ -1,5 +1,6 @@
 using Budget.Api.Data;
 using Budget.Api.Services;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 
 namespace Budget.Api.Endpoints;
@@ -9,9 +10,14 @@ namespace Budget.Api.Endpoints;
 /// <summary>
 /// What the iPhone Shortcut posts. Every field is a string on purpose: Shortcuts
 /// hands over "S$12.50" or "12.50" depending on how you wire it, and we'd rather
-/// parse leniently than drop a transaction.
+/// parse leniently than drop a transaction. Numbers are read as text too.
 /// </summary>
-public record ApplePayIngest(string? Amount, string? Merchant, string? Card, string? Date, string? Name);
+public record ApplePayIngest(
+    [property: JsonConverter(typeof(AnyAsText))] string? Amount,
+    [property: JsonConverter(typeof(AnyAsText))] string? Merchant,
+    [property: JsonConverter(typeof(AnyAsText))] string? Card,
+    [property: JsonConverter(typeof(AnyAsText))] string? Date,
+    [property: JsonConverter(typeof(AnyAsText))] string? Name);
 
 public record SpendCreate(decimal Amount, string Merchant, string? Currency, string? Date, int? CategoryId, string? Notes, string? Card, int? AccountId);
 // Kind: salary (default) | other | refund. Cpf: on a salary, the CPF paid on it (employee + employer), added to the CPF holdings.

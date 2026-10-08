@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Budget.Api.Endpoints;
 using Budget.Api.Services;
 using Budget.Web.Services;
 
@@ -74,6 +76,14 @@ public class TransitTests
     [InlineData(null, false)]
     public void Recognises_public_transport(string? merchant, bool expected) =>
         Assert.Equal(expected, MerchantText.IsTransit(merchant));
+
+    [Theory]
+    [InlineData("""{"amount":0,"merchant":"BUS/MRT"}""", "0")]
+    [InlineData("""{"amount":3.4,"merchant":"BUS/MRT"}""", "3.4")]
+    [InlineData("""{"amount":"S$0.00","merchant":"BUS/MRT"}""", "S$0.00")]
+    [InlineData("""{"merchant":"BUS/MRT"}""", null)]
+    public void Shortcut_amount_is_read_as_text_even_when_sent_as_a_number(string json, string? expected) =>
+        Assert.Equal(expected, JsonSerializer.Deserialize<ApplePayIngest>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.Amount);
 }
 
 public class PayPeriodTests
