@@ -312,16 +312,19 @@ public static class TransactionEndpoints
     {
         var merchant = FirstNonBlank(body.Merchant, body.Name) ?? "Unknown merchant";
 
-        // Bus/MRT taps report S$0 (or nothing): the fare is worked out after the trip and
-        // charged later. Keep the trip rather than reject it. Bank alerts with S$0 are noise.
-        if (source == TransactionSource.ApplePayShortcut && AmountParser.IsBlankOrZero(body.Amount))
+        var settings = await budgets.GetSettingsAsync(ct);
+        var readable = AmountParser.TryParse(body.Amount, settings.BaseCurrency, out var amount, out var currency);
+
+        // Bus/MRT taps report S$0, nothing, or text like "Pending": the fare is worked out after
+        // the trip and charged later. Keep the trip rather than reject it. Bank alerts with S$0 are noise.
+        if (source == TransactionSource.ApplePayShortcut
+            && (AmountParser.IsBlankOrZero(body.Amount) || (!readable && MerchantText.IsTransit(merchant))))
         {
             var trip = await svc.LogPendingFareAsync(merchant, body.Card, clock.ParseToUtc(body.Date), source, ct);
             return Results.Ok(new { message = trip.Message, duplicate = false, transaction = ToDto(trip.Transaction) });
         }
 
-        var settings = await budgets.GetSettingsAsync(ct);
-        if (!AmountParser.TryParse(body.Amount, settings.BaseCurrency, out var amount, out var currency))
+        if (!readable)
             return Results.BadRequest(new { message = $"Couldn't read amount '{body.Amount}'." });
 
         var result = await svc.IngestSpendAsync(amount, currency, merchant, body.Card,

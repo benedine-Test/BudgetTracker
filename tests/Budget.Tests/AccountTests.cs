@@ -508,6 +508,33 @@ public sealed class StatementImportTests : IDisposable
         Assert.Equal(1, await _db.Transactions.CountAsync());
         Assert.Equal(96.60m, await _accounts.BalanceAsync(a));
     }
+
+    [Fact]
+    public async Task Bus_mrt_charge_dated_the_same_day_covers_that_evenings_trips()
+    {
+        var a = await AddAccountAsync(100m, 1);
+        await _tx.LogPendingFareAsync("BUS/MRT", "iPhone", Local(4, 8), TransactionSource.ApplePayShortcut);
+        await _tx.LogPendingFareAsync("BUS/MRT", "iPhone", Local(4, 19), TransactionSource.ApplePayShortcut);
+
+        // A statement line has no time of day; it must still cover the 7pm trip.
+        await _accounts.CommitAsync(a, [new ImportRowIn(new DateOnly(2026, 10, 4), "BUS/MRT 123456", 3.40m, false, false)], [], null, null);
+
+        Assert.Equal(1, await _db.Transactions.CountAsync());
+    }
+
+    [Fact]
+    public async Task Bus_mrt_charge_posted_days_late_still_covers_its_trips()
+    {
+        var a = await AddAccountAsync(100m, 1);
+        await _tx.LogPendingFareAsync("BUS/MRT", "iPhone", Local(2, 8), TransactionSource.ApplePayShortcut);
+        await _tx.LogPendingFareAsync("BUS/MRT", "iPhone", Local(9, 8), TransactionSource.ApplePayShortcut); // after the charge: stays
+
+        // Trip on the 2nd, billed on the 3rd, posted by the bank on the 7th.
+        await _accounts.CommitAsync(a, [new ImportRowIn(new DateOnly(2026, 10, 7), "BUS/MRT 123456", 1.20m, false, false)], [], null, null);
+
+        Assert.Equal(2, await _db.Transactions.CountAsync());
+        Assert.Equal(0, await _db.Transactions.CountAsync(t => t.OccurredAtUtc < Local(5)));
+    }
 }
 
 public class SchemaUpgradeTests

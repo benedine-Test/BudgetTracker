@@ -13,8 +13,11 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
     /// <summary>Marks a S$0 tap whose fare hasn't been charged yet (bus/MRT).</summary>
     public const string FarePendingNote = "Fare pending — bus/MRT fares are charged later, usually as one BUS/MRT charge per day.";
 
-    /// <summary>How far back a BUS/MRT charge looks for the taps it pays for (charges post a day or two late).</summary>
-    public static readonly TimeSpan PendingFareLookback = TimeSpan.FromDays(3);
+    /// <summary>
+    /// How many days before its own date a BUS/MRT charge looks for the taps it pays for.
+    /// SimplyGo bills a day's trips the next day and the bank can post that 1–3 days later still.
+    /// </summary>
+    public const int PendingFareLookbackDays = 5;
 
     /// <summary>
     /// A tap with no amount yet — a bus or MRT gate. Saved as S$0 so the trip is on record
@@ -53,11 +56,15 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
     {
         if (charge.IsIncome || charge.Amount <= 0 || !MerchantText.IsTransit(charge.Merchant)) return;
 
-        var from = charge.OccurredAtUtc - PendingFareLookback;
+        // Whole local days: a statement line has a date but no time (it's saved as noon), so a
+        // charge dated the same day as an evening trip must still cover it.
+        var day = clock.ToLocalDate(charge.OccurredAtUtc);
+        var from = clock.LocalDateStartToUtc(day.AddDays(-PendingFareLookbackDays));
+        var to = clock.LocalDateStartToUtc(day.AddDays(1));
         // Amount is checked after loading: SQLite can't compare decimals in SQL.
         var pending = (await db.Transactions
             .Where(t => !t.IsIncome && t.Notes == FarePendingNote
-                        && t.OccurredAtUtc >= from && t.OccurredAtUtc <= charge.OccurredAtUtc)
+                        && t.OccurredAtUtc >= from && t.OccurredAtUtc < to)
             .ToListAsync(ct))
             .Where(t => t.Amount == 0)
             .ToList();
