@@ -143,10 +143,26 @@ else
                 <label for="h-balance">Balance (S$)</label>
                 <input id="h-balance" type="number" inputmode="decimal" step="0.01" min="0" @bind="balance" />
             }
+            else if (IsPolicy && found is { HasPolicyTerms: true })
+            {
+                <label for="h-name">Name</label>
+                <input id="h-name" type="text" @bind="name" />
+                <p class="hint">
+                    What you've paid in comes from the policy's premium schedule, and its value from the statements you enter.
+                    <a class="link" href="invest/policy/@editId">Policy details</a>
+                </p>
+            }
             else if (IsPolicy)
             {
                 <label for="h-name">Name</label>
                 <input id="h-name" type="text" placeholder="FWD Invest First Plus" @bind="name" />
+                @if (editId is not null)
+                {
+                    <p class="hint">
+                        Have the contract? Set up its terms to see the surrender value and a projection.
+                        <a class="link" href="invest/policy/@editId">Policy details</a>
+                    </p>
+                }
 
                 <label for="h-paid">Total paid in so far (S$)</label>
                 <input id="h-paid" type="number" inputmode="decimal" step="0.01" min="0" @bind="paid" />
@@ -220,34 +236,37 @@ else
                 }
             }
 
-            <label class="check">
-                <input type="checkbox" @bind="hasContribution" />
-                Money goes in from my bank regularly
-            </label>
-            @if (hasContribution)
+            @if (!PolicyHasTerms)
             {
-                <label for="h-match">The bank entry contains</label>
-                <input id="h-match" type="text" autocorrect="off" placeholder="FWD" @bind="contributionMatch" />
-                <div class="two">
-                    <div>
-                        <label for="h-camt">Amount each time (optional)</label>
-                        <input id="h-camt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="300" @bind="contributionAmount" />
+                <label class="check">
+                    <input type="checkbox" @bind="hasContribution" />
+                    Money goes in from my bank regularly
+                </label>
+                @if (hasContribution)
+                {
+                    <label for="h-match">The bank entry contains</label>
+                    <input id="h-match" type="text" autocorrect="off" placeholder="FWD" @bind="contributionMatch" />
+                    <div class="two">
+                        <div>
+                            <label for="h-camt">Amount each time (optional)</label>
+                            <input id="h-camt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="300" @bind="contributionAmount" />
+                        </div>
+                        <div>
+                            <label for="h-cacc">From (optional)</label>
+                            <select id="h-cacc" @bind="contributionAccountId">
+                                <option value="">Any account</option>
+                                @foreach (var a in accounts)
+                                {
+                                    <option value="@a.Id">@a.Name</option>
+                                }
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label for="h-cacc">From (optional)</label>
-                        <select id="h-cacc" @bind="contributionAccountId">
-                            <option value="">Any account</option>
-                            @foreach (var a in accounts)
-                            {
-                                <option value="@a.Id">@a.Name</option>
-                            }
-                        </select>
-                    </div>
-                </div>
-                <p class="hint">
-                    Each matching payment is added to what you've put in@(IsBalance || IsPolicy ? "" : ", at cost until you update the units held").
-                    Payments before today are taken as already in the figures above. They show up once the bank entry is in the app, for example after a statement import.
-                </p>
+                    <p class="hint">
+                        Each matching payment is added to what you've put in@(IsBalance || IsPolicy ? "" : ", at cost until you update the units held").
+                        Payments before today are taken as already in the figures above. They show up once the bank entry is in the app, for example after a statement import.
+                    </p>
+                }
             }
 
             <label for="h-platform">Where it is held (optional)</label>
@@ -305,6 +324,8 @@ else
     private bool IsBalance => assetClass is "Cpf" or "Cash";
     /// <summary>An ILP: what was paid in and what the insurer says it's worth.</summary>
     private bool IsPolicy => assetClass == "Policy";
+    /// <summary>An ILP set up on its policy screen, which owns its figures and bank text.</summary>
+    private bool PolicyHasTerms => IsPolicy && found is { HasPolicyTerms: true };
     private static bool IsPriced(string assetClass) => assetClass is not ("Cpf" or "Cash");
     private static bool IsBalanceClass(string assetClass) => assetClass is "Cpf" or "Cash" or "Policy";
     private static bool FetchesByDefault(string assetClass) => assetClass is "Etf" or "Stock" or "Crypto";
@@ -415,6 +436,12 @@ else
             body = new HoldingSave(assetClass == "Cpf" ? "CPF" : "CASH", name.Trim(), assetClass, Clean(platform),
                 1, balance!.Value, "SGD", balance.Value, 1, false, match, camt, cacc);
         }
+        else if (PolicyHasTerms)
+        {
+            // Only the name and platform are edited here; the rest follows the policy.
+            body = new HoldingSave(found!.Symbol, name.Trim(), assetClass, Clean(platform),
+                1, found.AverageCost, "SGD", found.LastPrice, 1, false, match, camt, cacc);
+        }
         else if (IsPolicy)
         {
             body = new HoldingSave("ILP", name.Trim(), assetClass, Clean(platform),
@@ -461,6 +488,8 @@ else
             if (balance is not >= 0) return "Enter the balance.";
             return null;
         }
+
+        if (PolicyHasTerms) return string.IsNullOrWhiteSpace(name) ? "Give it a name." : null;
 
         if (IsPolicy)
         {

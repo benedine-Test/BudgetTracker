@@ -228,3 +228,37 @@ public class Holding
     /// </summary>
     public bool IsBalance => !AutoPrice && Units == 1;
 }
+
+/// <summary>
+/// The contract terms of an investment-linked policy (ILP), attached to its <see cref="Holding"/>.
+/// The fixed facts are columns; the fee, bonus and surrender-charge tables are kept as data in
+/// <see cref="ScheduleJson"/> (a <see cref="PolicySchedule"/>) so a wrong figure can be corrected
+/// without touching the maths.
+/// </summary>
+public class PolicyTerms
+{
+    public int Id { get; set; }
+    public int HoldingId { get; set; }
+    /// <summary>Day one of policy year 1. Each later policy year starts on this date's anniversary.</summary>
+    public DateOnly CommencementDate { get; set; }
+    /// <summary>Monthly regular premium, due on the commencement date's day of the month.</summary>
+    public decimal MonthlyPremium { get; set; }
+    /// <summary>Initial Contribution Period: premiums in these first months go to the Initial Units Account.</summary>
+    public int InitialPeriodMonths { get; set; }
+    /// <summary>Minimum Investment Period, in policy years.</summary>
+    public int MinimumInvestmentYears { get; set; }
+    public string ScheduleJson { get; set; } = "{}";
+}
+
+/// <summary>Account values as an insurer's statement gave them on a date. The app never estimates these.</summary>
+public class PolicyValuation
+{
+    public int Id { get; set; }
+    public int HoldingId { get; set; }
+    public DateOnly AsOf { get; set; }
+    /// <summary>Initial Units Account value.</summary>
+    public decimal InitialUnits { get; set; }
+    /// <summary>Accumulation Units Account value.</summary>
+    public decimal AccumulationUnits { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}

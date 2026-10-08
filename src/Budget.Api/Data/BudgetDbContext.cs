@@ -12,6 +12,8 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<Holding> Holdings => Set<Holding>();
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
+    public DbSet<PolicyTerms> PolicyTerms => Set<PolicyTerms>();
+    public DbSet<PolicyValuation> PolicyValuations => Set<PolicyValuation>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -71,6 +73,20 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(h => h.ContributionMatch).HasMaxLength(100);
             e.Property(h => h.ContributionAmount).HasPrecision(18, 2);
             e.Ignore(h => h.IsBalance);
+        });
+
+        // Linked to a holding by id only, like ImportBatch to its account; removed with the holding.
+        b.Entity<PolicyTerms>(e =>
+        {
+            e.Property(t => t.MonthlyPremium).HasPrecision(18, 2);
+            e.HasIndex(t => t.HoldingId).IsUnique();
+        });
+
+        b.Entity<PolicyValuation>(e =>
+        {
+            e.Property(v => v.InitialUnits).HasPrecision(18, 2);
+            e.Property(v => v.AccumulationUnits).HasPrecision(18, 2);
+            e.HasIndex(v => v.HoldingId);
         });
     }
 }

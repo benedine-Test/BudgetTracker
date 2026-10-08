@@ -165,6 +165,67 @@ public static class SchemaUpgrade
                     ? "UPDATE [Holdings] SET [FiguresAsOfUtc] = SYSUTCDATETIME();"
                     : "UPDATE \"Holdings\" SET \"FiguresAsOfUtc\" = strftime('%Y-%m-%d %H:%M:%f', 'now');", ct);
             }
+
+            // ---- ILP contract terms and statement values ----
+            if (!await TableExistsAsync(conn, "PolicyTerms", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PolicyTerms] (
+                          [Id] int NOT NULL IDENTITY,
+                          [HoldingId] int NOT NULL,
+                          [CommencementDate] date NOT NULL,
+                          [MonthlyPremium] decimal(18,2) NOT NULL,
+                          [InitialPeriodMonths] int NOT NULL,
+                          [MinimumInvestmentYears] int NOT NULL,
+                          [ScheduleJson] nvarchar(max) NOT NULL,
+                          CONSTRAINT [PK_PolicyTerms] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PolicyTerms" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PolicyTerms" PRIMARY KEY AUTOINCREMENT,
+                          "HoldingId" INTEGER NOT NULL,
+                          "CommencementDate" TEXT NOT NULL,
+                          "MonthlyPremium" TEXT NOT NULL,
+                          "InitialPeriodMonths" INTEGER NOT NULL,
+                          "MinimumInvestmentYears" INTEGER NOT NULL,
+                          "ScheduleJson" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE UNIQUE INDEX [IX_PolicyTerms_HoldingId] ON [PolicyTerms] ([HoldingId]);"
+                    : "CREATE UNIQUE INDEX \"IX_PolicyTerms_HoldingId\" ON \"PolicyTerms\" (\"HoldingId\");", ct);
+            }
+
+            if (!await TableExistsAsync(conn, "PolicyValuations", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PolicyValuations] (
+                          [Id] int NOT NULL IDENTITY,
+                          [HoldingId] int NOT NULL,
+                          [AsOf] date NOT NULL,
+                          [InitialUnits] decimal(18,2) NOT NULL,
+                          [AccumulationUnits] decimal(18,2) NOT NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_PolicyValuations] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PolicyValuations" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PolicyValuations" PRIMARY KEY AUTOINCREMENT,
+                          "HoldingId" INTEGER NOT NULL,
+                          "AsOf" TEXT NOT NULL,
+                          "InitialUnits" TEXT NOT NULL,
+                          "AccumulationUnits" TEXT NOT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_PolicyValuations_HoldingId] ON [PolicyValuations] ([HoldingId]);"
+                    : "CREATE INDEX \"IX_PolicyValuations_HoldingId\" ON \"PolicyValuations\" (\"HoldingId\");", ct);
+            }
         }
         finally
         {

@@ -1,0 +1,511 @@
+@page "/invest/policy/{Id:int}"
+@using System.Globalization
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Insurance plan</PageTitle>
+
+<header class="topbar">
+    <div>
+        <a class="link back" href="invest">‹ Invest</a>
+        <h1>@(v?.Name ?? "Insurance plan")</h1>
+        @if (v?.Today is { } t)
+        {
+            <p class="sub">
+                Policy year @t.PolicyYear · surrender charge @Fmt.Percent(t.EarlyEncashmentPercent) of the initial units
+                until @Day(t.NextYearStarts.AddDays(-1)), then @Fmt.Percent(t.NextEarlyEncashmentPercent)
+            </p>
+        }
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (v is null)
+{
+    <Loading />
+}
+else
+{
+    @if (!v.Configured)
+    {
+        <section class="card notice">
+            <h2>Set up the policy terms</h2>
+            <p>Start date, premium and the contract's fee, bonus and surrender-charge tables. The standard terms of @v.PlanName are filled in below; check them against your contract and correct anything that differs.</p>
+        </section>
+    }
+    else
+    {
+        var latest = v.Statements.FirstOrDefault();
+        <section class="card hero">
+            @if (latest is null)
+            {
+                <p class="label">Premiums paid so far</p>
+                <p class="big">@Fmt.Money(v.Today!.PremiumsPaid)</p>
+                <p class="sub">@v.Today.PremiumsDue monthly premiums of @Fmt.Money(v.MonthlyPremium). Enter the values from your latest statement below to see the surrender value.</p>
+            }
+            else
+            {
+                <p class="label">Surrender value on @Day(latest.AsOf)</p>
+                <p class="big">@Fmt.Money(latest.SurrenderValue)</p>
+                <dl class="facts">
+                    <dt>Premiums paid to then</dt><dd class="num">@Fmt.Money(latest.PremiumsPaid)</dd>
+                    <dt>Account value</dt><dd class="num">@Fmt.Money(latest.AccountValue)</dd>
+                    <dt class="muted">Initial units</dt><dd class="num muted">@Fmt.Money(latest.InitialUnits)</dd>
+                    <dt class="muted">Accumulation units</dt><dd class="num muted">@Fmt.Money(latest.AccumulationUnits)</dd>
+                    <dt>Surrender charge (@Fmt.Percent(latest.EarlyEncashmentPercent) of initial units, year @latest.PolicyYear)</dt>
+                    <dd class="num">@Fmt.Money(-latest.EarlyEncashmentCharge)</dd>
+                    <dt>@(latest.Gap > 0 ? "Short of what you paid by" : "Ahead of what you paid by")</dt>
+                    <dd class="num @(latest.Gap > 0 ? "neg" : "pos")">@Fmt.Money(Math.Abs(latest.Gap))</dd>
+                </dl>
+            }
+        </section>
+
+        @if (v.BankText is not null)
+        {
+            <section class="card">
+                <h2>Premiums from the bank</h2>
+                <p class="muted">
+                    @if (v.BankPremiumsFound == 0)
+                    {
+                        <text>No entries containing “@v.BankText” yet. They show once the bank entry is in the app, for example after a statement import.</text>
+                    }
+                    else
+                    {
+                        <text>@v.BankPremiumsFound found, filed under Savings.</text>
+                    }
+                </p>
+                @if (v.MissedPremiums.Count > 0)
+                {
+                    <p class="hint neg">No bank payment found near: @string.Join(", ", v.MissedPremiums.Select(Day)).</p>
+                }
+            </section>
+        }
+
+        <section class="card">
+            <h2>Statement values</h2>
+            <p class="muted small">From your HSBC statement or app. A second entry for the same date replaces the first.</p>
+            <form @onsubmit="AddStatement" @onsubmit:preventDefault>
+                <label for="s-date">Statement date</label>
+                <input id="s-date" type="date" @bind="stDate" />
+                <div class="two">
+                    <div>
+                        <label for="s-iua">Initial units (S$)</label>
+                        <input id="s-iua" type="number" inputmode="decimal" step="0.01" min="0" @bind="stIua" />
+                    </div>
+                    <div>
+                        <label for="s-aua">Accumulation units (S$)</label>
+                        <input id="s-aua" type="number" inputmode="decimal" step="0.01" min="0" @bind="stAua" />
+                    </div>
+                </div>
+                @if (stError is not null)
+                {
+                    <p class="field-error" role="alert">@stError</p>
+                }
+                <button type="submit" class="btn primary block" disabled="@busy">Add statement</button>
+            </form>
+            @if (v.Statements.Count > 0)
+            {
+                <div class="rows">
+                    @foreach (var s in v.Statements)
+                    {
+                        <div class="row static">
+                            <span class="row-main">
+                                <span class="tx-name">@Day(s.AsOf) <span class="muted">· year @s.PolicyYear</span></span>
+                                <span class="muted small">Value @Fmt.Money(s.AccountValue) · paid @Fmt.Money(s.PremiumsPaid)</span>
+                            </span>
+                            <span class="row-end">
+                                <span class="num">@Fmt.Money(s.SurrenderValue)</span>
+                                <button type="button" class="link" @onclick="() => DeleteStatement(s)">
+                                    @(confirmDeleteId == s.ValuationId ? "Tap again to remove" : "Remove")
+                                </button>
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="card">
+            <h2>Projection</h2>
+            <p class="muted small">
+                Not a forecast: what the fees and bonuses do at a steady return. The return is before fund charges
+                (@Fmt.Percent(v.Schedule.FundChargePercent) a year comes off it). Values are on the last day of each policy year.
+            </p>
+            <div class="two">
+                <div>
+                    <label for="p-r1">Return A (% a year)</label>
+                    <input id="p-r1" type="number" inputmode="decimal" step="0.1" @bind="rateA" @bind:after="LoadProjection" />
+                </div>
+                <div>
+                    <label for="p-r2">Return B (% a year)</label>
+                    <input id="p-r2" type="number" inputmode="decimal" step="0.1" @bind="rateB" @bind:after="LoadProjection" />
+                </div>
+            </div>
+            <div class="chips wrap proj-from">
+                <button type="button" class="chip @(fromLatest ? "" : "on")" @onclick="() => SetFrom(false)">From day one</button>
+                <button type="button" class="chip @(fromLatest ? "on" : "")" disabled="@(v.Statements.Count == 0)" @onclick="() => SetFrom(true)">From latest statement</button>
+            </div>
+            @if (projError is not null)
+            {
+                <p class="field-error" role="alert">@projError</p>
+            }
+            else if (proj is { Count: 2 })
+            {
+                <div class="table-wrap">
+                    <table class="proj">
+                        <thead>
+                            <tr>
+                                <th rowspan="2">Year</th>
+                                <th rowspan="2">Paid</th>
+                                <th colspan="2">At @Fmt.Percent(proj[0].GrossReturnPercent)</th>
+                                <th colspan="2">At @Fmt.Percent(proj[1].GrossReturnPercent)</th>
+                            </tr>
+                            <tr><th>Value</th><th>Surrender</th><th>Value</th><th>Surrender</th></tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < proj[0].Years.Count; i++)
+                            {
+                                var a = proj[0].Years[i];
+                                var b = proj[1].Years[i];
+                                <tr>
+                                    <td>@a.Year</td>
+                                    <td>@K(a.PremiumsPaid)</td>
+                                    <td>@K(a.AccountValue)</td>
+                                    <td class="@(a.SurrenderValue >= a.PremiumsPaid ? "pos" : "")">@K(a.SurrenderValue)</td>
+                                    <td>@K(b.AccountValue)</td>
+                                    <td class="@(b.SurrenderValue >= b.PremiumsPaid ? "pos" : "")">@K(b.SurrenderValue)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="hint">Thousands of S$. Green: surrender value at or above the premiums paid.</p>
+            }
+        </section>
+    }
+
+    <section class="card">
+        <h2>Contract terms</h2>
+        @if (v.Configured && !showTerms)
+        {
+            <p class="muted small">
+                Started @Day(v.CommencementDate!.Value) · @Fmt.Money(v.MonthlyPremium) a month ·
+                first @v.InitialPeriodMonths months to initial units · minimum investment @v.MinimumInvestmentYears years
+            </p>
+            <button type="button" class="btn small" @onclick="() => showTerms = true">Check or correct the terms</button>
+        }
+        else
+        {
+            <form @onsubmit="SaveTerms" @onsubmit:preventDefault>
+                <div class="two">
+                    <div>
+                        <label for="t-start">Start date</label>
+                        <input id="t-start" type="date" @bind="tStart" />
+                    </div>
+                    <div>
+                        <label for="t-prem">Monthly premium (S$)</label>
+                        <input id="t-prem" type="number" inputmode="decimal" step="0.01" min="0" @bind="tPremium" />
+                    </div>
+                </div>
+                <div class="two">
+                    <div>
+                        <label for="t-icp">Initial contribution period (months)</label>
+                        <input id="t-icp" type="number" inputmode="numeric" step="1" min="0" @bind="tIcp" />
+                    </div>
+                    <div>
+                        <label for="t-mip">Minimum investment period (years)</label>
+                        <input id="t-mip" type="number" inputmode="numeric" step="1" min="1" @bind="tMip" />
+                    </div>
+                </div>
+
+                <label for="t-bank">The bank entry contains</label>
+                <input id="t-bank" type="text" autocorrect="off" placeholder="HSBC LIFE" @bind="tBank" />
+                <p class="hint">Entries with this text are filed under Savings in your budget, and checked off month by month here.</p>
+
+                <label for="t-sub">Start-up bonus, % of each premium by policy year</label>
+                <input id="t-sub" type="text" inputmode="decimal" @bind="tStartUp" />
+
+                <label for="t-eec">Surrender charge, % of initial units by policy year</label>
+                <input id="t-eec" type="text" inputmode="decimal" @bind="tEec" />
+                <p class="hint">Comma-separated, year 1 first. Years after the last one are 0%.</p>
+
+                @RateList("Fees on initial units (% a year)", tIuaFees)
+                @RateList("Fees on accumulation units (% a year)", tAuaFees)
+                @RateList("Bonuses on total account value (% a year, into accumulation units)", tBonuses)
+                <p class="hint">Leave “to year” empty for the rest of the policy.</p>
+
+                <div class="two">
+                    <div>
+                        <label for="t-fmc">Fund charges (% a year)</label>
+                        <input id="t-fmc" type="number" inputmode="decimal" step="0.01" min="0" @bind="tFundCharge" />
+                    </div>
+                    <div>
+                        <label for="t-pwc">Partial withdrawal charge (%)</label>
+                        <input id="t-pwc" type="number" inputmode="decimal" step="0.01" min="0" @bind="tWithdrawal" />
+                    </div>
+                </div>
+
+                <h3 class="group-title">Funds</h3>
+                @foreach (var f in tFunds)
+                {
+                    <div class="rate-row funds">
+                        <input type="text" aria-label="Fund" @bind="f.Name" />
+                        <input type="text" aria-label="Currency" @bind="f.Currency" />
+                        <input type="number" aria-label="Percent" inputmode="decimal" step="any" @bind="f.Percent" />
+                        <button type="button" class="link" @onclick="() => tFunds.Remove(f)">Remove</button>
+                    </div>
+                }
+                <button type="button" class="link" @onclick="() => tFunds.Add(new FundEdit())">Add a fund</button>
+
+                @if (termsError is not null)
+                {
+                    <p class="field-error" role="alert">@termsError</p>
+                }
+                <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save terms")</button>
+            </form>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
+    private PolicyView? v;
+    private string? error;
+    private bool busy;
+
+    private DateOnly stDate = Fmt.Today;
+    private decimal? stIua;
+    private decimal? stAua;
+    private string? stError;
+    private int? confirmDeleteId;
+
+    private decimal rateA = 4;
+    private decimal rateB = 8;
+    private bool fromLatest;
+    private List<ProjectionView>? proj;
+    private string? projError;
+
+    private bool showTerms;
+    private DateOnly? tStart;
+    private decimal? tPremium;
+    private int? tIcp;
+    private int? tMip;
+    private string tBank = "";
+    private string tStartUp = "";
+    private string tEec = "";
+    private List<RateEdit> tIuaFees = [];
+    private List<RateEdit> tAuaFees = [];
+    private List<RateEdit> tBonuses = [];
+    private decimal? tFundCharge;
+    private decimal? tWithdrawal;
+    private List<FundEdit> tFunds = [];
+    private string? termsError;
+
+    private sealed class RateEdit
+    {
+        public string Name { get; set; } = "";
+        public int? From { get; set; } = 1;
+        public int? To { get; set; }
+        public decimal? Percent { get; set; }
+    }
+
+    private sealed class FundEdit
+    {
+        public string Name { get; set; } = "";
+        public string Currency { get; set; } = "SGD";
+        public decimal? Percent { get; set; }
+    }
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            Show(await Api.Policy(Id));
+            if (v!.Configured) await LoadProjection();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private void Show(PolicyView view)
+    {
+        v = view;
+        showTerms = !view.Configured;
+        var s = view.Schedule;
+        // Blank until set up: a default date would be easy to save by mistake and would skew every figure.
+        tStart = view.CommencementDate;
+        tPremium = view.Configured ? Fmt.Trim(view.MonthlyPremium) : null;
+        tIcp = view.InitialPeriodMonths;
+        tMip = view.MinimumInvestmentYears;
+        tBank = view.BankText ?? "";
+        tStartUp = string.Join(", ", s.StartUpBonusPercent.Select(Num));
+        tEec = string.Join(", ", s.EarlyEncashmentPercent.Select(Num));
+        tIuaFees = s.InitialUnitsFees.Select(ToEdit).ToList();
+        tAuaFees = s.AccumulationUnitsFees.Select(ToEdit).ToList();
+        tBonuses = s.AccountValueBonuses.Select(ToEdit).ToList();
+        tFundCharge = Fmt.Trim(s.FundChargePercent);
+        tWithdrawal = Fmt.Trim(s.PartialWithdrawalChargePercent);
+        tFunds = s.Funds.Select(f => new FundEdit { Name = f.Name, Currency = f.Currency, Percent = Fmt.Trim(f.Percent) }).ToList();
+        if (view.Statements.Count == 0) fromLatest = false;
+    }
+
+    private static RateEdit ToEdit(YearRate r) => new() { Name = r.Name, From = r.FromYear, To = r.ToYear, Percent = Fmt.Trim(r.PercentPerYear) };
+
+    private RenderFragment RateList(string title, List<RateEdit> list) => __builder =>
+    {
+        <h3 class="group-title">@title</h3>
+        @if (list.Count > 0)
+        {
+            <p class="muted small">Name · from year · to year · %</p>
+        }
+        @foreach (var r in list)
+        {
+            <div class="rate-row">
+                <input type="text" aria-label="Name" @bind="r.Name" />
+                <input type="number" aria-label="From year" inputmode="numeric" min="1" @bind="r.From" />
+                <input type="number" aria-label="To year" inputmode="numeric" min="1" placeholder="—" @bind="r.To" />
+                <input type="number" aria-label="% a year" inputmode="decimal" step="any" @bind="r.Percent" />
+                <button type="button" class="link" @onclick="() => list.Remove(r)">Remove</button>
+            </div>
+        }
+        <button type="button" class="link" @onclick="() => list.Add(new RateEdit())">Add</button>
+    };
+
+    private async Task LoadProjection()
+    {
+        projError = null;
+        try
+        {
+            proj = await Api.Projection(Id, [rateA, rateB], fromLatest);
+        }
+        catch (ApiException e)
+        {
+            projError = e.Message;
+        }
+    }
+
+    private async Task SetFrom(bool latest)
+    {
+        fromLatest = latest;
+        await LoadProjection();
+    }
+
+    private async Task AddStatement()
+    {
+        if (busy) return;
+        stError = stIua is not >= 0 || stAua is not >= 0 ? "Enter both account values (0 if empty)." : null;
+        if (stError is not null) return;
+        busy = true;
+        try
+        {
+            Show(await Api.AddStatement(Id, stDate, stIua!.Value, stAua!.Value));
+            (stIua, stAua) = (null, null);
+            Toast.Show("Statement added.");
+            await LoadProjection();
+        }
+        catch (ApiException e)
+        {
+            stError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeleteStatement(PolicyPosition s)
+    {
+        if (busy) return;
+        if (confirmDeleteId != s.ValuationId)
+        {
+            confirmDeleteId = s.ValuationId;
+            return;
+        }
+        busy = true;
+        try
+        {
+            Show(await Api.DeleteStatement(Id, s.ValuationId));
+            confirmDeleteId = null;
+            await LoadProjection();
+        }
+        catch (ApiException e)
+        {
+            stError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveTerms()
+    {
+        if (busy) return;
+        termsError = null;
+        var startUp = ParseList(tStartUp);
+        var eec = ParseList(tEec);
+        if (startUp is null || eec is null) termsError = "Write the by-year tables as numbers separated by commas, such as 30, 40, 40.";
+        else if (tStart is null) termsError = "Enter the start date from your policy contract.";
+        else if (tPremium is not > 0) termsError = "Enter the monthly premium.";
+        else if (tIcp is null || tMip is null) termsError = "Enter both periods.";
+        else if (new[] { tIuaFees, tAuaFees, tBonuses }.SelectMany(l => l).Any(r => r.From is null || r.Percent is null))
+            termsError = "Each fee and bonus needs a from year and a rate.";
+        else if (tFunds.Any(f => f.Percent is null)) termsError = "Each fund needs a percentage.";
+        else if (tFundCharge is null || tWithdrawal is null) termsError = "Enter the fund and withdrawal charges (0 if none).";
+        if (termsError is not null) return;
+
+        static List<YearRate> Rates(List<RateEdit> list) =>
+            list.Select(r => new YearRate(r.Name.Trim(), r.From!.Value, r.To, r.Percent!.Value)).ToList();
+        var schedule = new PolicySchedule(startUp!, Rates(tIuaFees), Rates(tAuaFees), Rates(tBonuses), eec!,
+            tFundCharge!.Value, tWithdrawal!.Value,
+            tFunds.Select(f => new FundShare(f.Name.Trim(), f.Currency.Trim().ToUpperInvariant(), f.Percent!.Value)).ToList());
+
+        busy = true;
+        try
+        {
+            var saved = await Api.SavePolicy(Id, new PolicySetup(tStart!.Value, tPremium!.Value, tIcp!.Value, tMip!.Value, schedule, tBank.Trim()));
+            Show(saved.Policy);
+            var note = saved.ReFiled > 0 ? $" {saved.ReFiled} bank entries filed under {saved.Category}." : "";
+            if (saved.ConfirmedElsewhere > 0) note += $" {saved.ConfirmedElsewhere} you filed yourself were left as they are.";
+            Toast.Show("Terms saved." + note);
+            await LoadProjection();
+        }
+        catch (ApiException e)
+        {
+            termsError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static List<decimal>? ParseList(string text)
+    {
+        var result = new List<decimal>();
+        foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!decimal.TryParse(part.TrimEnd('%'), NumberStyles.Number, Inv, out var d)) return null;
+            result.Add(d);
+        }
+        return result;
+    }
+
+    private static string Num(decimal d) => Fmt.Trim(d).ToString(Inv);
+
+    private static string Day(DateOnly d) => d.ToString("d MMM yyyy", Inv);
+
+    /// <summary>Thousands, one decimal: 272,609 → 272.6.</summary>
+    private static string K(decimal value) => (value / 1000m).ToString("#,0.0", Inv);
+}

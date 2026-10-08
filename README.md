@@ -78,7 +78,7 @@ What it does for you: card bill payments are filed as **Transfer** so they don't
 
 Limits: scanned PDFs can't be read. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF or Excel file, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
-**Existing databases** are upgraded on startup (the `Accounts` and `ImportBatches` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
+**Existing databases** are upgraded on startup (the `Accounts`, `ImportBatches`, `PolicyTerms` and `PolicyValuations` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -126,6 +126,9 @@ Things to check in your first week:
 | POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase, autoPrice?, contributionMatch?, contributionAmount?, contributionAccountId?}` |
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
 | POST | `/api/holdings/refresh?force=` | Fetch due prices (`autoPrice` holdings) and exchange rates from Yahoo Finance |
+| GET/PUT | `/api/holdings/{id}/policy` | ILP terms: `{commencementDate, monthlyPremium, initialPeriodMonths, minimumInvestmentYears, schedule?, bankText?}` → statements with surrender value, bank premium check |
+| POST/DELETE | `/api/holdings/{id}/policy/valuations[/{valuationId}]` | `{asOf, initialUnits, accumulationUnits}` from a statement |
+| GET | `/api/holdings/{id}/policy/projection?rate=4&rate=8&from=start` | Account and surrender value per policy year (`from=latest` starts at the newest statement) |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
 | GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
@@ -141,6 +144,12 @@ Things to check in your first week:
 
 - **Automatic prices.** With `autoPrice: true` the symbol is looked up on Yahoo Finance (ES3.SI, VWRA.L, AAPL, BTC-USD), and every foreign holding's exchange rate is refreshed too. Yahoo's endpoint is unofficial: if it fails, the last price stays and the reason shows on the holding. Prices fetched in the last 15 minutes are skipped unless forced.
 - **Insurance plans (ILPs).** `assetClass: "Policy"`, `units: 1`, `averageCost` = total paid in, `lastPrice` = the value the insurer shows. There is no public price, so the value is updated by hand.
+- **ILP with contract terms** (Invest → the plan → *Policy details*). For a regular-premium ILP with an Initial Units Account (IUA) and an Accumulation Units Account (AUA), such as HSBC Life Wealth Accelerate:
+  - **Terms are data.** Start date, monthly premium, initial contribution period and minimum investment period, plus the fee, start-up bonus, account-value bonus, surrender-charge (EEC) and fund tables, stored per policy and editable on the policy screen. New policies start from the HSBC Life Wealth Accelerate terms; correct anything that differs from your contract.
+  - **Values only from statements.** Enter the IUA and AUA values with the statement date; nothing is estimated from fund prices. For each statement: premiums paid to that date, account value, surrender value (account value − the EEC for that date's policy year × IUA) and the gap to premiums paid. Policy years run anniversary to anniversary (started 8 Mar 2024 → year 3 from 8 Mar 2026).
+  - **In the portfolio**, cost is premiums due so far and value is the latest statement plus premiums due since, at cost.
+  - **In the budget**, the bank text (e.g. `HSBC LIFE`) becomes a rule filing the premium under Investments (Savings bucket); unconfirmed entries already in the app are re-filed. The screen flags months with no bank debit within 15 days of the due date, from the first debit in the app onwards.
+  - **Projection** per policy year to the year after the minimum investment period, at two gross returns (default 4% and 8%), from day one or from the latest statement. Each month: premium in (to the IUA with start-up bonus during the initial period, then to the AUA), growth at the gross return less fund charges, IUA/AUA fees off, then account-value bonus into the AUA. It's an illustration, not HSBC's own method; their benefit illustration is the check.
 - **Regular contributions.** `contributionMatch` is text the bank entry contains (e.g. `FWD`), optionally narrowed by `contributionAmount` and `contributionAccountId`. Matching spends after the holding's units/cost were last entered are added on top, at cost, until the figures are updated. A typed-in balance (CPF, an ILP's value) takes in every payment made before it. The bank entry has to be in the app first, usually from a statement import.
 
 ## Deploying

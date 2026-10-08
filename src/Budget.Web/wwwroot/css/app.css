@@ -353,3 +353,19 @@ form > .three:first-child label, form > .two:first-child label { margin-top: 0; 
     background: var(--danger); color: #fff; font-weight: 600;
 }
 #blazor-error-ui .reload { text-decoration: underline; margin-left: 8px; }
+
+/* ---- Insurance plan (ILP) ---- */
+.back { display: inline-block; margin: 0 0 6px; }
+.facts { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 12px 0 0; font-size: 15px; }
+.facts dt, .facts dd { margin: 0; }
+.facts dd { text-align: right; }
+.proj-from { margin-top: 12px; }
+.table-wrap { overflow-x: auto; margin: 10px -4px 0; }
+table.proj { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.proj th { font-weight: 600; color: var(--muted); padding: 4px; text-align: right; white-space: nowrap; }
+table.proj td { padding: 5px 4px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+table.proj th:first-child, table.proj td:first-child { text-align: left; }
+.rate-row { display: grid; grid-template-columns: 1fr 56px 56px 64px auto; gap: 6px; align-items: center; margin-top: 6px; }
+.rate-row.funds { grid-template-columns: 1fr 64px 64px auto; }
+.rate-row input { min-height: 40px; padding: 0 8px; font-size: 16px; }
+.rate-row .link { margin-left: 0; }

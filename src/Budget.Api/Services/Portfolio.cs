@@ -8,7 +8,8 @@ public record HoldingValue(
     decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct,
     bool PriceIsStale, bool AutoPrice, string? PriceError,
     string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
-    int ContributionCount, decimal ContributedBase, DateTime? LastContributionAtUtc, decimal NotInFiguresBase);
+    int ContributionCount, decimal ContributedBase, DateTime? LastContributionAtUtc, decimal NotInFiguresBase,
+    bool HasPolicyTerms = false);
 
 public record AllocationSlice(string AssetClass, decimal ValueBase, decimal Percent);
 
@@ -64,7 +65,13 @@ public static class Portfolio
     public static PortfolioSummary Summarise(IEnumerable<Holding> holdings, DateTime nowUtc) =>
         Summarise(holdings, [], nowUtc);
 
-    public static PortfolioSummary Summarise(IEnumerable<Holding> holdings, IReadOnlyList<Contribution> contributions, DateTime nowUtc)
+    /// <param name="workedOut">
+    /// Cost and value already worked out elsewhere, by holding id: an ILP with contract terms uses
+    /// its premium schedule and statements (see <see cref="PolicyMath.Figures"/>). Bank contributions
+    /// are still counted and shown for it, but don't change these figures.
+    /// </param>
+    public static PortfolioSummary Summarise(IEnumerable<Holding> holdings, IReadOnlyList<Contribution> contributions, DateTime nowUtc,
+        IReadOnlyDictionary<int, (decimal Cost, decimal Value)>? workedOut = null)
     {
         var byHolding = contributions.ToLookup(c => c.HoldingId);
         var rows = holdings.Select(h =>
@@ -79,13 +86,16 @@ public static class Portfolio
             var cost = Math.Round(h.Units * h.AverageCost * h.FxToBase + notInCost, 2);
             // No price yet → value at cost so totals aren't wildly wrong.
             var value = Math.Round(h.Units * (h.LastPrice ?? h.AverageCost) * h.FxToBase + notInValue, 2);
+            if (workedOut is not null && workedOut.TryGetValue(h.Id, out var known))
+                (cost, value, notInCost) = (known.Cost, known.Value, 0);
             var pnl = value - cost;
             decimal? pnlPct = cost == 0 ? null : Math.Round(pnl / cost * 100, 2);
             var stale = h.LastPriceAtUtc is null || nowUtc - h.LastPriceAtUtc > StaleAfter;
             return new HoldingValue(h.Id, h.Symbol, h.Name, h.AssetClass.ToString(), h.Platform, h.Units, h.AverageCost, h.Currency, h.FxToBase,
                 h.LastPrice, h.LastPriceAtUtc, cost, value, pnl, pnlPct, stale, h.AutoPrice, h.PriceError,
                 h.ContributionMatch, h.ContributionAmount, h.ContributionAccountId,
-                paid.Count, paid.Sum(c => c.Amount), paid.Count == 0 ? null : paid.Max(c => c.OccurredAtUtc), notInCost);
+                paid.Count, paid.Sum(c => c.Amount), paid.Count == 0 ? null : paid.Max(c => c.OccurredAtUtc), notInCost,
+                workedOut?.ContainsKey(h.Id) == true);
         }).OrderByDescending(r => r.MarketValueBase).ToList();
 
         var totalCost = rows.Sum(r => r.CostBase);

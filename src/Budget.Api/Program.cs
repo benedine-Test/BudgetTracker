@@ -70,6 +70,7 @@ var api = app.MapGroup("/api").AddEndpointFilter(async (ctx, next) =>
 api.MapTransactionEndpoints();
 api.MapBudgetEndpoints();
 api.MapAccountEndpoints();
+api.MapPolicyEndpoints();
 
 // Unknown /api paths are a 404, not the app page.
 app.Map("/api/{**rest}", () => Results.NotFound());
