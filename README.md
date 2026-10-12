@@ -39,7 +39,7 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 | Source | Endpoint | Status |
 |---|---|---|
 | Apple Pay tap (iPhone Shortcut) | `POST /api/ingest/apple-pay` | ✅ ready |
-| Bank card alert email (parsed elsewhere) | `POST /api/ingest/card-alert` | ✅ endpoint ready — parsers depend on your banks |
+| Bank card alert email (Gmail script in `tools/gmail-card-alerts`) | `POST /api/ingest/card-alert` | ✅ ready — check the sender addresses and preview before turning it on |
 | Manual entry | `POST /api/transactions` | ✅ ready |
 | Salary / other income | `POST /api/income` | ✅ ready |
 | Statement import (PDF, CSV or Excel) | `POST /api/accounts/{id}/import[/preview]` | ✅ ready — any bank; PDF needs a real (not scanned) statement |
