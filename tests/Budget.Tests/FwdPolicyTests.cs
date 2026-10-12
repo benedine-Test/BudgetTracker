@@ -224,6 +224,32 @@ public class FwdPolicyTests
         Assert.InRange(rows[2].AccountValue, 14_847m - 15, 14_847m + 15);
     }
 
+    /// <summary>The bank's text for an FWD premium, as the OCBC app shows it (policy number made up).</summary>
+    private const string FwdDebit = "Inward DR - GIRO 12345678-20261021 OTHR 12345678 FWD SINGAPORE PTE.";
+
+    [Theory]
+    [InlineData("12345678")]
+    [InlineData("FWD SINGAPORE")]
+    public void FWD_GIRO_debit_is_found_by_its_policy_number_or_name(string bankText)
+    {
+        var fwd = new Holding { Id = 2, AssetClass = AssetClass.Policy, ContributionMatch = bankText, ContributionAmount = 300m };
+        var debit = new Transaction { Id = 1, Merchant = FwdDebit, Amount = 300m, OccurredAtUtc = new DateTime(2026, 10, 12, 1, 0, 0, DateTimeKind.Utc) };
+
+        Assert.Single(Portfolio.MatchContributions([fwd], [debit], "SGD"));
+        Assert.Contains(MerchantText.Normalize(bankText), MerchantText.Normalize(FwdDebit));   // the budget rule matches too
+    }
+
+    [Fact]
+    public void FWD_debits_taken_9_days_before_the_due_date_count_for_that_month()
+    {
+        // OCBC takes the 21 Oct premium on 12 Oct; earlier months on about the same lead.
+        var debits = new[] { new DateOnly(2026, 8, 12), new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12) };
+        Assert.Empty(PolicyMath.MissedPremiums(Start, debits, new DateOnly(2026, 11, 10), 30));
+        // Drop September's: it is flagged, not taken as October's.
+        Assert.Equal([new DateOnly(2026, 9, 21)],
+            PolicyMath.MissedPremiums(Start, [debits[0], debits[2]], new DateOnly(2026, 11, 10), 30));
+    }
+
     [Fact]
     public void Combined_view_adds_up_both_policies_each_at_its_own_statement_date()
     {
