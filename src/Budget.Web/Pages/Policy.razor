@@ -12,7 +12,7 @@
         @if (v?.Today is { } t)
         {
             <p class="sub">
-                Policy year @t.PolicyYear · surrender charge @Fmt.Percent(t.EarlyEncashmentPercent) of the initial units
+                Policy year @t.PolicyYear · surrender charge @Fmt.Percent(t.EarlyEncashmentPercent) of the initial account
                 until @Day(t.NextYearStarts.AddDays(-1)), then @Fmt.Percent(t.NextEarlyEncashmentPercent)
             </p>
         }
@@ -33,7 +33,7 @@ else
     {
         <section class="card notice">
             <h2>Set up the policy terms</h2>
-            <p>Start date, premium and the contract's fee, bonus and surrender-charge tables. The standard terms of @v.PlanName are filled in below; check them against your contract and correct anything that differs.</p>
+            <p>Start date, premium and the contract's fee, bonus and surrender-charge tables. Pick the plan below to fill in its standard terms, then check them against your contract and correct anything that differs.</p>
         </section>
     }
     else
@@ -53,9 +53,9 @@ else
                 <dl class="facts">
                     <dt>Premiums paid to then</dt><dd class="num">@Fmt.Money(latest.PremiumsPaid)</dd>
                     <dt>Account value</dt><dd class="num">@Fmt.Money(latest.AccountValue)</dd>
-                    <dt class="muted">Initial units</dt><dd class="num muted">@Fmt.Money(latest.InitialUnits)</dd>
-                    <dt class="muted">Accumulation units</dt><dd class="num muted">@Fmt.Money(latest.AccumulationUnits)</dd>
-                    <dt>Surrender charge (@Fmt.Percent(latest.EarlyEncashmentPercent) of initial units, year @latest.PolicyYear)</dt>
+                    <dt class="muted">Initial account</dt><dd class="num muted">@Fmt.Money(latest.InitialUnits)</dd>
+                    <dt class="muted">Accumulation account</dt><dd class="num muted">@Fmt.Money(latest.AccumulationUnits)</dd>
+                    <dt>Surrender charge (@Fmt.Percent(latest.EarlyEncashmentPercent) of initial account, year @latest.PolicyYear)</dt>
                     <dd class="num">@Fmt.Money(-latest.EarlyEncashmentCharge)</dd>
                     <dt>@(latest.Gap > 0 ? "Short of what you paid by" : "Ahead of what you paid by")</dt>
                     <dd class="num @(latest.Gap > 0 ? "neg" : "pos")">@Fmt.Money(Math.Abs(latest.Gap))</dd>
@@ -86,17 +86,17 @@ else
 
         <section class="card">
             <h2>Statement values</h2>
-            <p class="muted small">From your HSBC statement or app. A second entry for the same date replaces the first.</p>
+            <p class="muted small">From your insurer's statement or app. A second entry for the same date replaces the first.</p>
             <form @onsubmit="AddStatement" @onsubmit:preventDefault>
                 <label for="s-date">Statement date</label>
                 <input id="s-date" type="date" @bind="stDate" />
                 <div class="two">
                     <div>
-                        <label for="s-iua">Initial units (S$)</label>
+                        <label for="s-iua">Initial account (S$)</label>
                         <input id="s-iua" type="number" inputmode="decimal" step="0.01" min="0" @bind="stIua" />
                     </div>
                     <div>
-                        <label for="s-aua">Accumulation units (S$)</label>
+                        <label for="s-aua">Accumulation account (S$)</label>
                         <input id="s-aua" type="number" inputmode="decimal" step="0.01" min="0" @bind="stAua" />
                     </div>
                 </div>
@@ -193,13 +193,25 @@ else
         {
             <p class="muted small">
                 Started @Day(v.CommencementDate!.Value) · @Fmt.Money(v.MonthlyPremium) a month ·
-                first @v.InitialPeriodMonths months to initial units · minimum investment @v.MinimumInvestmentYears years
+                first @v.InitialPeriodMonths months to the initial account
+                @(v.PremiumTermYears is { } term ? $" · premiums for {term} years" : "")
+                @(v.MinimumInvestmentYears > 0 ? $" · minimum investment {v.MinimumInvestmentYears} years" : "")
             </p>
             <button type="button" class="btn small" @onclick="() => showTerms = true">Check or correct the terms</button>
         }
         else
         {
             <form @onsubmit="SaveTerms" @onsubmit:preventDefault>
+                @if (!v.Configured && plans.Count > 0)
+                {
+                    <label for="t-plan">Plan</label>
+                    <select id="t-plan" @bind="planKey" @bind:after="PlanChanged">
+                        @foreach (var plan in plans)
+                        {
+                            <option value="@plan.Key">@plan.Name</option>
+                        }
+                    </select>
+                }
                 <div class="two">
                     <div>
                         <label for="t-start">Start date</label>
@@ -217,24 +229,27 @@ else
                     </div>
                     <div>
                         <label for="t-mip">Minimum investment period (years)</label>
-                        <input id="t-mip" type="number" inputmode="numeric" step="1" min="1" @bind="tMip" />
+                        <input id="t-mip" type="number" inputmode="numeric" step="1" min="0" @bind="tMip" />
                     </div>
                 </div>
+                <label for="t-term">Premium term (years)</label>
+                <input id="t-term" type="number" inputmode="numeric" step="1" min="1" placeholder="Empty: beyond 30 years, e.g. to age 99" @bind="tTerm" />
+                <p class="hint">Minimum investment period 0 if the plan has none. No premiums are counted after the premium term.</p>
 
                 <label for="t-bank">The bank entry contains</label>
-                <input id="t-bank" type="text" autocorrect="off" placeholder="HSBC LIFE" @bind="tBank" />
+                <input id="t-bank" type="text" autocorrect="off" placeholder="HSBC LIFE, FWD" @bind="tBank" />
                 <p class="hint">Entries with this text are filed under Savings in your budget, and checked off month by month here.</p>
 
-                <label for="t-sub">Start-up bonus, % of each premium by policy year</label>
+                <label for="t-sub">Premium bonus (start-up / booster), % of each premium by policy year</label>
                 <input id="t-sub" type="text" inputmode="decimal" @bind="tStartUp" />
 
-                <label for="t-eec">Surrender charge, % of initial units by policy year</label>
+                <label for="t-eec">Surrender charge, % of the initial account by policy year</label>
                 <input id="t-eec" type="text" inputmode="decimal" @bind="tEec" />
-                <p class="hint">Comma-separated, year 1 first. Years after the last one are 0%.</p>
+                <p class="hint">Comma-separated, year 1 first. Years after the last one are 0%. The premium bonus always goes to the initial account and isn't paid on a missed premium.</p>
 
-                @RateList("Fees on initial units (% a year)", tIuaFees)
-                @RateList("Fees on accumulation units (% a year)", tAuaFees)
-                @RateList("Bonuses on total account value (% a year, into accumulation units)", tBonuses)
+                @RateList("Fees on the initial account (% a year)", tIuaFees, false)
+                @RateList("Fees on the accumulation account (% a year)", tAuaFees, false)
+                @RateList("Bonuses on account value (% a year, into the accumulation account)", tBonuses, true)
                 <p class="hint">Leave “to year” empty for the rest of the policy.</p>
 
                 <div class="two">
@@ -259,6 +274,18 @@ else
                     </div>
                 }
                 <button type="button" class="link" @onclick="() => tFunds.Add(new FundEdit())">Add a fund</button>
+
+                @if (StoredOnly() is { Count: > 0 } stored)
+                {
+                    <h3 class="group-title">Also in the contract</h3>
+                    <ul class="muted small stored">
+                        @foreach (var line in stored)
+                        {
+                            <li>@line</li>
+                        }
+                    </ul>
+                    <p class="hint">Kept with the terms. Projections assume every premium is paid in full, with no withdrawals, top-ups or premium cuts.</p>
+                }
 
                 @if (termsError is not null)
                 {
@@ -296,6 +323,11 @@ else
     private decimal? tPremium;
     private int? tIcp;
     private int? tMip;
+    private int? tTerm;
+    private List<PolicyPlan> plans = [];
+    private string planKey = "hsbc-wealth-accelerate";
+    /// <summary>The schedule being edited, so settings the form doesn't show (premium charges, withdrawals) are kept.</summary>
+    private PolicySchedule? baseSchedule;
     private string tBank = "";
     private string tStartUp = "";
     private string tEec = "";
@@ -313,6 +345,12 @@ else
         public int? From { get; set; } = 1;
         public int? To { get; set; }
         public decimal? Percent { get; set; }
+        /// <summary>"" = to year <see cref="To"/>, or "MinimumInvestmentPeriod" / "PremiumTerm".</summary>
+        public string Ends { get; set; } = "";
+        public decimal? Cap { get; set; }
+        /// <summary>Bonuses: timing and base together, "Monthly|TotalAccount".</summary>
+        public string Paid { get; set; } = "Monthly|TotalAccount";
+        public bool Scaled { get; set; }
     }
 
     private sealed class FundEdit
@@ -331,6 +369,7 @@ else
         {
             Show(await Api.Policy(Id));
             if (v!.Configured) await LoadProjection();
+            else plans = await Api.PolicyPlans();
         }
         catch (ApiException e)
         {
@@ -343,12 +382,21 @@ else
         v = view;
         showTerms = !view.Configured;
         var s = view.Schedule;
+        baseSchedule = s;
         // Blank until set up: a default date would be easy to save by mistake and would skew every figure.
         tStart = view.CommencementDate;
         tPremium = view.Configured ? Fmt.Trim(view.MonthlyPremium) : null;
         tIcp = view.InitialPeriodMonths;
         tMip = view.MinimumInvestmentYears;
+        tTerm = view.PremiumTermYears;
         tBank = view.BankText ?? "";
+        ShowSchedule(s);
+        if (view.Statements.Count == 0) fromLatest = false;
+    }
+
+    private void ShowSchedule(PolicySchedule s)
+    {
+        baseSchedule = s;
         tStartUp = string.Join(", ", s.StartUpBonusPercent.Select(Num));
         tEec = string.Join(", ", s.EarlyEncashmentPercent.Select(Num));
         tIuaFees = s.InitialUnitsFees.Select(ToEdit).ToList();
@@ -357,12 +405,46 @@ else
         tFundCharge = Fmt.Trim(s.FundChargePercent);
         tWithdrawal = Fmt.Trim(s.PartialWithdrawalChargePercent);
         tFunds = s.Funds.Select(f => new FundEdit { Name = f.Name, Currency = f.Currency, Percent = Fmt.Trim(f.Percent) }).ToList();
-        if (view.Statements.Count == 0) fromLatest = false;
     }
 
-    private static RateEdit ToEdit(YearRate r) => new() { Name = r.Name, From = r.FromYear, To = r.ToYear, Percent = Fmt.Trim(r.PercentPerYear) };
+    /// <summary>A new policy takes the chosen plan's standard terms; the start date and premium stay blank.</summary>
+    private void PlanChanged()
+    {
+        if (plans.FirstOrDefault(x => x.Key == planKey) is not { } plan) return;
+        tIcp = plan.InitialPeriodMonths;
+        tMip = plan.MinimumInvestmentYears;
+        tTerm = plan.PremiumTermYears;
+        ShowSchedule(plan.Schedule);
+    }
 
-    private RenderFragment RateList(string title, List<RateEdit> list) => __builder =>
+    private static RateEdit ToEdit(YearRate r) => new()
+    {
+        Name = r.Name, From = r.FromYear, To = r.ToYear, Percent = Fmt.Trim(r.PercentPerYear), Ends = r.Until ?? "",
+        Cap = Fmt.Trim(r.CapPerYear), Paid = $"{r.Timing}|{r.Base}", Scaled = r.Adjustment != "None",
+    };
+
+    private static YearRate FromEdit(RateEdit r)
+    {
+        var paid = r.Paid.Split('|');
+        return new YearRate(r.Name.Trim(), r.From!.Value, r.To, r.Percent!.Value, r.Ends == "" ? null : r.Ends, r.Cap,
+            paid[0], paid[1], r.Scaled ? "PremiumsPaidLessWithdrawals" : "None");
+    }
+
+    /// <summary>Contract terms the form doesn't edit, in words.</summary>
+    private List<string> StoredOnly()
+    {
+        var lines = new List<string>();
+        if (baseSchedule is not { } s) return lines;
+        foreach (var c in s.PremiumCharges ?? [])
+            lines.Add(c.Kind == "Shortfall"
+                ? $"{c.Name}: {Fmt.Percent(c.PercentPerYear)} a year of the annual premium after {c.AfterMissedMonths} missed months in a row"
+                : $"{c.Name}: {Fmt.Percent(c.PercentPerYear)} a year of a premium cut, policy years {c.FromYear}–{c.ToYear}");
+        if (s.WithdrawalsFromMonth is { } wm) lines.Add($"Withdrawals from month {wm}");
+        if (s.TopUpChargePercent is { } top) lines.Add($"Top-up charge {Fmt.Percent(top)}");
+        return lines;
+    }
+
+    private RenderFragment RateList(string title, List<RateEdit> list, bool bonus) => __builder =>
     {
         <h3 class="group-title">@title</h3>
         @if (list.Count > 0)
@@ -377,6 +459,27 @@ else
                 <input type="number" aria-label="To year" inputmode="numeric" min="1" placeholder="—" @bind="r.To" />
                 <input type="number" aria-label="% a year" inputmode="decimal" step="any" @bind="r.Percent" />
                 <button type="button" class="link" @onclick="() => list.Remove(r)">Remove</button>
+            </div>
+            <div class="rate-more">
+                <select aria-label="Ends" @bind="r.Ends">
+                    <option value="">Ends: to year</option>
+                    <option value="MinimumInvestmentPeriod">Ends with min. investment period</option>
+                    <option value="PremiumTerm">Ends with premium term</option>
+                </select>
+                @if (bonus)
+                {
+                    <select aria-label="Paid" @bind="r.Paid">
+                        <option value="Monthly|TotalAccount">Monthly, on total value</option>
+                        <option value="Monthly|AccumulationAccount">Monthly, on accumulation</option>
+                        <option value="PolicyYearEnd|TotalAccount">Year end, on total value</option>
+                        <option value="PolicyYearEnd|AccumulationAccount">Year end, on accumulation</option>
+                    </select>
+                    <label class="check small"><input type="checkbox" @bind="r.Scaled" /> Scaled by premiums paid in the year</label>
+                }
+                else
+                {
+                    <input type="number" aria-label="Cap S$ a year" inputmode="decimal" step="any" min="0" placeholder="No cap (S$/yr)" @bind="r.Cap" />
+                }
             </div>
         }
         <button type="button" class="link" @onclick="() => list.Add(new RateEdit())">Add</button>
@@ -458,23 +561,26 @@ else
         if (startUp is null || eec is null) termsError = "Write the by-year tables as numbers separated by commas, such as 30, 40, 40.";
         else if (tStart is null) termsError = "Enter the start date from your policy contract.";
         else if (tPremium is not > 0) termsError = "Enter the monthly premium.";
-        else if (tIcp is null || tMip is null) termsError = "Enter both periods.";
+        else if (tIcp is null || tMip is null) termsError = "Enter both periods (0 if the plan has no minimum investment period).";
         else if (new[] { tIuaFees, tAuaFees, tBonuses }.SelectMany(l => l).Any(r => r.From is null || r.Percent is null))
             termsError = "Each fee and bonus needs a from year and a rate.";
         else if (tFunds.Any(f => f.Percent is null)) termsError = "Each fund needs a percentage.";
         else if (tFundCharge is null || tWithdrawal is null) termsError = "Enter the fund and withdrawal charges (0 if none).";
         if (termsError is not null) return;
 
-        static List<YearRate> Rates(List<RateEdit> list) =>
-            list.Select(r => new YearRate(r.Name.Trim(), r.From!.Value, r.To, r.Percent!.Value)).ToList();
-        var schedule = new PolicySchedule(startUp!, Rates(tIuaFees), Rates(tAuaFees), Rates(tBonuses), eec!,
-            tFundCharge!.Value, tWithdrawal!.Value,
-            tFunds.Select(f => new FundShare(f.Name.Trim(), f.Currency.Trim().ToUpperInvariant(), f.Percent!.Value)).ToList());
+        static List<YearRate> Rates(List<RateEdit> list) => list.Select(FromEdit).ToList();
+        var schedule = baseSchedule! with
+        {
+            StartUpBonusPercent = startUp!, InitialUnitsFees = Rates(tIuaFees), AccumulationUnitsFees = Rates(tAuaFees),
+            AccountValueBonuses = Rates(tBonuses), EarlyEncashmentPercent = eec!, FundChargePercent = tFundCharge!.Value,
+            PartialWithdrawalChargePercent = tWithdrawal!.Value,
+            Funds = tFunds.Select(f => new FundShare(f.Name.Trim(), f.Currency.Trim().ToUpperInvariant(), f.Percent!.Value)).ToList(),
+        };
 
         busy = true;
         try
         {
-            var saved = await Api.SavePolicy(Id, new PolicySetup(tStart!.Value, tPremium!.Value, tIcp!.Value, tMip!.Value, schedule, tBank.Trim()));
+            var saved = await Api.SavePolicy(Id, new PolicySetup(tStart!.Value, tPremium!.Value, tIcp!.Value, tMip!.Value, schedule, tBank.Trim(), tTerm));
             Show(saved.Policy);
             var note = saved.ReFiled > 0 ? $" {saved.ReFiled} bank entries filed under {saved.Category}." : "";
             if (saved.ConfirmedElsewhere > 0) note += $" {saved.ConfirmedElsewhere} you filed yourself were left as they are.";

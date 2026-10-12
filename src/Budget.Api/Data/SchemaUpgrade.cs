@@ -215,6 +215,7 @@ public static class SchemaUpgrade
                           [MonthlyPremium] decimal(18,2) NOT NULL,
                           [InitialPeriodMonths] int NOT NULL,
                           [MinimumInvestmentYears] int NOT NULL,
+                          [PremiumTermYears] int NULL,
                           [ScheduleJson] nvarchar(max) NOT NULL,
                           CONSTRAINT [PK_PolicyTerms] PRIMARY KEY ([Id])
                       );
@@ -227,12 +228,21 @@ public static class SchemaUpgrade
                           "MonthlyPremium" TEXT NOT NULL,
                           "InitialPeriodMonths" INTEGER NOT NULL,
                           "MinimumInvestmentYears" INTEGER NOT NULL,
+                          "PremiumTermYears" INTEGER NULL,
                           "ScheduleJson" TEXT NOT NULL
                       );
                       """, ct);
                 await db.Database.ExecuteSqlRawAsync(sqlServer
                     ? "CREATE UNIQUE INDEX [IX_PolicyTerms_HoldingId] ON [PolicyTerms] ([HoldingId]);"
                     : "CREATE UNIQUE INDEX \"IX_PolicyTerms_HoldingId\" ON \"PolicyTerms\" (\"HoldingId\");", ct);
+            }
+
+            // Added with the second plan (FWD): a PolicyTerms table from before has no premium term.
+            if (!await ColumnExistsAsync(conn, "PolicyTerms", "PremiumTermYears", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [PolicyTerms] ADD [PremiumTermYears] int NULL;"
+                    : "ALTER TABLE \"PolicyTerms\" ADD COLUMN \"PremiumTermYears\" INTEGER NULL;", ct);
             }
 
             if (!await TableExistsAsync(conn, "PolicyValuations", sqlServer, ct))

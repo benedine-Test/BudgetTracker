@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Budget.Api.Endpoints;
 
 /// <summary>Contract terms of an ILP. A null schedule keeps the current one (or, the first time, the plan's standard terms).</summary>
+/// <summary>PremiumTermYears null = premiums run beyond any projection (e.g. to age 99).</summary>
 public record PolicySetup(DateOnly CommencementDate, decimal MonthlyPremium, int InitialPeriodMonths, int MinimumInvestmentYears,
-    PolicySchedule? Schedule = null, string? BankText = null);
+    PolicySchedule? Schedule = null, string? BankText = null, int? PremiumTermYears = null);
 
 public record ValuationAdd(DateOnly AsOf, decimal InitialUnits, decimal AccumulationUnits);
 
@@ -16,7 +17,8 @@ public record PolicyToday(DateOnly Date, int PolicyYear, decimal EarlyEncashment
 
 public record PolicyView(int HoldingId, string Name, bool Configured, DateOnly? CommencementDate, decimal MonthlyPremium,
     int InitialPeriodMonths, int MinimumInvestmentYears, PolicySchedule Schedule, string? BankText, string? PlanName,
-    PolicyToday? Today, List<PolicyPosition> Statements, int BankPremiumsFound, List<DateOnly> MissedPremiums);
+    PolicyToday? Today, List<PolicyPosition> Statements, int BankPremiumsFound, List<DateOnly> MissedPremiums,
+    int? PremiumTermYears);
 
 public record PolicySaved(PolicyView Policy, int ReFiled, int ConfirmedElsewhere, string? Category);
 
@@ -26,6 +28,21 @@ public static class PolicyEndpoints
 {
     public static void MapPolicyEndpoints(this RouteGroupBuilder api)
     {
+        // Standard terms of the plans the app knows, to start a policy from.
+        api.MapGet("/policy-plans", () => PolicyPlans.All());
+
+        // Every ILP with terms together: monthly premium, premiums paid, policy and surrender value.
+        api.MapGet("/policies", async (BudgetDbContext db, Clock clock, CancellationToken ct) =>
+        {
+            var terms = await db.PolicyTerms.AsNoTracking().ToListAsync(ct);
+            var ids = terms.Select(t => t.HoldingId).ToList();
+            var names = await db.Holdings.AsNoTracking().Where(h => ids.Contains(h.Id)).ToDictionaryAsync(h => h.Id, h => h.Name, ct);
+            var latest = (await db.PolicyValuations.AsNoTracking().Where(v => ids.Contains(v.HoldingId)).ToListAsync(ct))
+                .GroupBy(v => v.HoldingId).ToDictionary(g => g.Key, g => g.MaxBy(v => v.AsOf));
+            return PolicyMath.Combine(terms.Where(t => names.ContainsKey(t.HoldingId)).Select(t =>
+                (t.HoldingId, names[t.HoldingId], t, PolicySchedule.Read(t.ScheduleJson), latest.GetValueOrDefault(t.HoldingId))), clock.Today);
+        });
+
         api.MapGet("/holdings/{id:int}/policy", async (int id, BudgetDbContext db, Clock clock, CancellationToken ct) =>
             await db.Holdings.AsNoTracking().FirstOrDefaultAsync(h => h.Id == id, ct) is { AssetClass: AssetClass.Policy } h
                 ? Results.Ok(await ViewAsync(db, clock, h, ct))
@@ -51,6 +68,7 @@ public static class PolicyEndpoints
             terms.MonthlyPremium = Math.Round(body.MonthlyPremium, 2);
             terms.InitialPeriodMonths = body.InitialPeriodMonths;
             terms.MinimumInvestmentYears = body.MinimumInvestmentYears;
+            terms.PremiumTermYears = body.PremiumTermYears;
             terms.ScheduleJson = schedule.Write();
 
             // The holding's own figures follow the policy, so the line still makes sense if the terms are removed.
@@ -59,7 +77,7 @@ public static class PolicyEndpoints
             h.PriceError = null;
             h.Currency = "SGD";
             h.FxToBase = 1;
-            h.AverageCost = PolicyMath.PremiumsDue(terms.CommencementDate, clock.Today) * terms.MonthlyPremium;
+            h.AverageCost = PolicyMath.PremiumsDue(terms, clock.Today) * terms.MonthlyPremium;
             h.FiguresAsOfUtc = clock.UtcNow;
 
             int reFiled = 0, elsewhere = 0;
@@ -145,7 +163,7 @@ public static class PolicyEndpoints
             }
 
             var schedule = PolicySchedule.Read(terms.ScheduleJson);
-            var toYear = terms.MinimumInvestmentYears + 1;
+            var toYear = PolicyMath.ProjectionYears(schedule);
             return Results.Ok(rates.Select(r => new ProjectionView(r, r - schedule.FundChargePercent, start?.AsOf,
                 PolicyMath.Project(terms, schedule, r, toYear, start).ToList())));
         });
@@ -157,7 +175,8 @@ public static class PolicyEndpoints
         if (b.CommencementDate.Year < 1950) return "Check the start date.";
         if (b.MonthlyPremium <= 0) return "The monthly premium must be more than zero.";
         if (b.InitialPeriodMonths is < 0 or > 600) return "The initial contribution period must be 0–600 months.";
-        if (b.MinimumInvestmentYears is < 1 or > 99) return "The minimum investment period must be 1–99 years.";
+        if (b.MinimumInvestmentYears is < 0 or > 99) return "The minimum investment period must be 0–99 years (0 if the plan has none).";
+        if (b.PremiumTermYears is < 1 or > 99) return "The premium term must be 1–99 years, or left empty.";
         if (b.BankText is { } t && t.Trim().Length is > 0 and < 3) return "Use at least 3 letters of the bank text, such as HSBC LIFE.";
         if (b.BankText is { Length: > 100 }) return "Keep the bank text under 100 characters.";
         return PolicyMath.Invalid(schedule);
@@ -191,13 +210,13 @@ public static class PolicyEndpoints
             // Not set up yet: offer the standard terms to start from.
             return new PolicyView(h.Id, h.Name, false, null, 0, PolicyPlans.HsbcWealthAccelerateInitialMonths,
                 PolicyPlans.HsbcWealthAccelerateMinimumYears, PolicyPlans.HsbcWealthAccelerate(), h.ContributionMatch,
-                PolicyPlans.HsbcWealthAccelerateName, null, [], 0, []);
+                PolicyPlans.HsbcWealthAccelerateName, null, [], 0, [], null);
         }
 
         var schedule = PolicySchedule.Read(terms.ScheduleJson);
         var today = clock.Today;
         var year = PolicyMath.PolicyYear(terms.CommencementDate, today);
-        var due = PolicyMath.PremiumsDue(terms.CommencementDate, today);
+        var due = PolicyMath.PremiumsDue(terms, today);
         var todayView = new PolicyToday(today, year, schedule.EarlyEncashmentIn(year), due, due * terms.MonthlyPremium,
             terms.CommencementDate.AddYears(year), schedule.EarlyEncashmentIn(year + 1));
 
@@ -210,6 +229,7 @@ public static class PolicyEndpoints
 
         return new PolicyView(h.Id, h.Name, true, terms.CommencementDate, terms.MonthlyPremium, terms.InitialPeriodMonths,
             terms.MinimumInvestmentYears, schedule, h.ContributionMatch, null, todayView, statements,
-            debits.Count, PolicyMath.MissedPremiums(terms.CommencementDate, debits, today).ToList());
+            debits.Count, PolicyMath.MissedPremiums(terms.CommencementDate, debits, today, terms.PremiumTermYears).ToList(),
+            terms.PremiumTermYears);
     }
 }

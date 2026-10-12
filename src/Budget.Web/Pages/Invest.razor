@@ -73,6 +73,49 @@ else
         </ul>
     </section>
 
+    @if (ilps is { Policies.Count: > 0 })
+    {
+        <section class="card">
+            <h2>Insurance plans</h2>
+            <dl class="facts">
+                <dt>Monthly premiums</dt><dd class="num">@Fmt.Money(ilps.MonthlyPremium)</dd>
+                <dt>Premiums paid so far</dt><dd class="num">@Fmt.Money(ilps.PremiumsPaid)</dd>
+                @if (ilps.WithoutStatement < ilps.Policies.Count)
+                {
+                    <dt>Policy value</dt><dd class="num">@Fmt.Money(ilps.PolicyValue)</dd>
+                    <dt>Surrender value</dt><dd class="num">@Fmt.Money(ilps.SurrenderValue)</dd>
+                    <dt>@(ilps.Gap > 0 ? "Short of premiums paid by" : "Ahead of premiums paid by")</dt>
+                    <dd class="num @(ilps.Gap > 0 ? "neg" : "pos")">@Fmt.Money(Math.Abs(ilps.Gap))</dd>
+                }
+            </dl>
+            <div class="rows">
+                @foreach (var l in ilps.Policies)
+                {
+                    <a class="row" href="invest/policy/@l.HoldingId">
+                        <span class="row-main">
+                            <span class="tx-name">@l.Name</span>
+                            <span class="muted small">
+                                @Fmt.Money(l.MonthlyPremium) a month · year @l.PolicyYear ·
+                                @(l.StatementDate is { } d ? $"statement {d.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)}" : "no statement yet")
+                            </span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num">@(l.SurrenderValue is { } sv ? Fmt.Money(sv) : "—")</span>
+                            <span class="muted small">surrender</span>
+                        </span>
+                    </a>
+                }
+            </div>
+            <p class="hint">
+                Values from each plan's latest statement, compared with the premiums paid up to that statement's date.
+                @if (ilps.WithoutStatement > 0)
+                {
+                    <text>@ilps.WithoutStatement without a statement yet @(ilps.WithoutStatement == 1 ? "isn't" : "aren't") in the values.</text>
+                }
+            </p>
+        </section>
+    }
+
     <section>
         <div class="day-head"><h2>Holdings</h2></div>
         <div class="card rows">
@@ -301,6 +344,8 @@ else
     private static readonly string[] Currencies = ["SGD", "USD", "HKD", "GBP", "EUR", "AUD", "JPY", "MYR"];
 
     private PortfolioSummary? p;
+    /// <summary>Every insurance plan with contract terms, added up.</summary>
+    private PoliciesTotal? ilps;
     private string? error;
 
     private bool editing;
@@ -377,6 +422,15 @@ else
         catch (ApiException e)
         {
             error = e.Message;
+            return;
+        }
+        try
+        {
+            ilps = await Api.Policies();
+        }
+        catch (ApiException)
+        {
+            ilps = null; // the holdings still show; the plans card just doesn't
         }
     }
 

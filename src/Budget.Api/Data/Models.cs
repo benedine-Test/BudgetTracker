@@ -265,8 +265,10 @@ public class PolicyTerms
     public decimal MonthlyPremium { get; set; }
     /// <summary>Initial Contribution Period: premiums in these first months go to the Initial Units Account.</summary>
     public int InitialPeriodMonths { get; set; }
-    /// <summary>Minimum Investment Period, in policy years.</summary>
+    /// <summary>Minimum Investment Period, in policy years. 0 = the plan has none.</summary>
     public int MinimumInvestmentYears { get; set; }
+    /// <summary>Years premiums are paid for; none are due after it. Null = beyond any projection (e.g. to age 99).</summary>
+    public int? PremiumTermYears { get; set; }
     public string ScheduleJson { get; set; } = "{}";
 }
 

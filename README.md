@@ -140,7 +140,9 @@ Things to check in your first week:
 | POST/PUT/DELETE | `/api/holdings[/{id}]` | `{symbol, name, assetClass, platform, units, averageCost, currency, lastPrice, fxToBase, autoPrice?, contributionMatch?, contributionAmount?, contributionAccountId?}` |
 | PUT | `/api/holdings/{id}/price` | `{price, fxToBase?}` |
 | POST | `/api/holdings/refresh?force=` | Fetch due prices (`autoPrice` holdings) and exchange rates from Yahoo Finance |
-| GET/PUT | `/api/holdings/{id}/policy` | ILP terms: `{commencementDate, monthlyPremium, initialPeriodMonths, minimumInvestmentYears, schedule?, bankText?}` → statements with surrender value, bank premium check |
+| GET | `/api/policy-plans` | Standard terms of the plans the app knows |
+| GET | `/api/policies` | All ILPs together: monthly premium, premiums paid, policy and surrender value |
+| GET/PUT | `/api/holdings/{id}/policy` | ILP terms: `{commencementDate, monthlyPremium, initialPeriodMonths, minimumInvestmentYears, premiumTermYears?, schedule?, bankText?}` → statements with surrender value, bank premium check |
 | POST/DELETE | `/api/holdings/{id}/policy/valuations[/{valuationId}]` | `{asOf, initialUnits, accumulationUnits}` from a statement |
 | GET | `/api/holdings/{id}/policy/projection?rate=4&rate=8&from=start` | Account and surrender value per policy year (`from=latest` starts at the newest statement) |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
@@ -158,7 +160,9 @@ Things to check in your first week:
 
 - **Automatic prices.** With `autoPrice: true` the symbol is looked up on Yahoo Finance (ES3.SI, VWRA.L, AAPL, BTC-USD), and every foreign holding's exchange rate is refreshed too. Yahoo's endpoint is unofficial: if it fails, the last price stays and the reason shows on the holding. Prices fetched in the last 15 minutes are skipped unless forced.
 - **Insurance plans (ILPs).** `assetClass: "Policy"`, `units: 1`, `averageCost` = total paid in, `lastPrice` = the value the insurer shows. There is no public price, so the value is updated by hand.
-- **ILP with contract terms** (Invest → the plan → *Policy details*). For a regular-premium ILP with an Initial Units Account (IUA) and an Accumulation Units Account (AUA), such as HSBC Life Wealth Accelerate:
+- **ILP with contract terms** (Invest → the plan → *Policy details*). For a regular-premium ILP with an Initial Units Account (IUA) and an Accumulation Units Account (AUA). Standard terms are included for **HSBC Life Wealth Accelerate** and **FWD Invest First Summit**; both run through the same calculation, with the differences held as per-policy settings:
+  - **Per-policy settings.** Initial contribution period, minimum investment period (0 = none) and premium term (no premiums after it). Each fee or bonus runs to a year or to the end of a named period, a fee can have a yearly cap (FWD's accumulation charge: 1.5%, at most S$756 a year), and a bonus is paid monthly or at policy-year end, on the total or the accumulation account, optionally scaled by premiums paid in the year (FWD's Loyalty Bonus). The premium bonus (HSBC start-up, FWD booster) always goes to the initial account and isn't paid on a missed premium. FWD's premium shortfall charge applies in projections with missed months; the premium reduction charge, withdrawal and top-up terms are stored only.
+  - **Combined view** on Invest: monthly premiums, premiums paid, policy value and surrender value across plans, each from its latest statement.
   - **Terms are data.** Start date, monthly premium, initial contribution period and minimum investment period, plus the fee, start-up bonus, account-value bonus, surrender-charge (EEC) and fund tables, stored per policy and editable on the policy screen. New policies start from the HSBC Life Wealth Accelerate terms; correct anything that differs from your contract.
   - **Values only from statements.** Enter the IUA and AUA values with the statement date; nothing is estimated from fund prices. For each statement: premiums paid to that date, account value, surrender value (account value − the EEC for that date's policy year × IUA) and the gap to premiums paid. Policy years run anniversary to anniversary (started 8 Mar 2024 → year 3 from 8 Mar 2026).
   - **In the portfolio**, cost is premiums due so far and value is the latest statement plus premiums due since, at cost.

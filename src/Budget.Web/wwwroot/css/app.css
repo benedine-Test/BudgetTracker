@@ -370,3 +370,7 @@ table.proj th:first-child, table.proj td:first-child { text-align: left; }
 .rate-row.funds { grid-template-columns: 1fr 64px 64px auto; }
 .rate-row input { min-height: 40px; padding: 0 8px; font-size: 16px; }
 .rate-row .link { margin-left: 0; }
+.rate-more { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.rate-more select, .rate-more input { width: auto; flex: 1 1 140px; min-height: 40px; font-size: 16px; }
+.rate-more .check.small { margin: 0; flex: 1 1 100%; }
+.stored { margin: 4px 0 0; padding-left: 18px; }

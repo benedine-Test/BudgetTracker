@@ -77,16 +77,27 @@ public record HoldingSave(string Symbol, string Name, string AssetClass, string?
     decimal Units, decimal AverageCost, string Currency, decimal? LastPrice, decimal? FxToBase,
     bool AutoPrice, string ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId);
 
-public record YearRate(string Name, int FromYear, int? ToYear, decimal PercentPerYear);
+/// <summary>Until: "MinimumInvestmentPeriod" | "PremiumTerm" | null. Timing: "Monthly" | "PolicyYearEnd".
+/// Base: "TotalAccount" | "AccumulationAccount". Adjustment: "None" | "PremiumsPaidLessWithdrawals".</summary>
+public record YearRate(string Name, int FromYear, int? ToYear, decimal PercentPerYear, string? Until = null,
+    decimal? CapPerYear = null, string Timing = "Monthly", string Base = "TotalAccount", string Adjustment = "None");
+
+/// <summary>Kind: "Shortfall" | "Reduction".</summary>
+public record PremiumCharge(string Name, string Kind, decimal PercentPerYear, int? AfterMissedMonths = null,
+    int? FromYear = null, int? ToYear = null, string? Until = null);
 
 public record FundShare(string Name, string Currency, decimal Percent);
 
 public record PolicySchedule(List<decimal> StartUpBonusPercent, List<YearRate> InitialUnitsFees, List<YearRate> AccumulationUnitsFees,
     List<YearRate> AccountValueBonuses, List<decimal> EarlyEncashmentPercent, decimal FundChargePercent,
-    decimal PartialWithdrawalChargePercent, List<FundShare> Funds);
+    decimal PartialWithdrawalChargePercent, List<FundShare> Funds, List<PremiumCharge>? PremiumCharges = null,
+    string? WithdrawalChargeUntil = null, int? WithdrawalsFromMonth = null, decimal? TopUpChargePercent = null);
+
+public record PolicyPlan(string Key, string Name, int InitialPeriodMonths, int MinimumInvestmentYears, int? PremiumTermYears,
+    PolicySchedule Schedule);
 
 public record PolicySetup(DateOnly CommencementDate, decimal MonthlyPremium, int InitialPeriodMonths, int MinimumInvestmentYears,
-    PolicySchedule? Schedule, string? BankText);
+    PolicySchedule? Schedule, string? BankText, int? PremiumTermYears);
 
 public record PolicyToday(DateOnly Date, int PolicyYear, decimal EarlyEncashmentPercent, int PremiumsDue, decimal PremiumsPaid,
     DateOnly NextYearStarts, decimal NextEarlyEncashmentPercent);
@@ -97,7 +108,14 @@ public record PolicyPosition(int ValuationId, DateOnly AsOf, int PolicyYear, dec
 
 public record PolicyView(int HoldingId, string Name, bool Configured, DateOnly? CommencementDate, decimal MonthlyPremium,
     int InitialPeriodMonths, int MinimumInvestmentYears, PolicySchedule Schedule, string? BankText, string? PlanName,
-    PolicyToday? Today, List<PolicyPosition> Statements, int BankPremiumsFound, List<DateOnly> MissedPremiums);
+    PolicyToday? Today, List<PolicyPosition> Statements, int BankPremiumsFound, List<DateOnly> MissedPremiums,
+    int? PremiumTermYears);
+
+public record PolicyLine(int HoldingId, string Name, decimal MonthlyPremium, decimal PremiumsPaid, int PolicyYear,
+    DateOnly? StatementDate, decimal? PremiumsPaidAtStatement, decimal? PolicyValue, decimal? SurrenderValue, decimal? Gap);
+
+public record PoliciesTotal(decimal MonthlyPremium, decimal PremiumsPaid, decimal PolicyValue, decimal SurrenderValue,
+    decimal Gap, int WithoutStatement, List<PolicyLine> Policies);
 
 public record PolicySaved(PolicyView Policy, int ReFiled, int ConfirmedElsewhere, string? Category);
 
@@ -260,6 +278,10 @@ public class Api(HttpClient http)
     public Task DeleteHolding(int id) => Send(HttpMethod.Delete, $"api/holdings/{id}");
 
     // ---- Insurance plans (ILP) ----
+    public Task<List<PolicyPlan>> PolicyPlans() => Get<List<PolicyPlan>>("api/policy-plans");
+
+    public Task<PoliciesTotal> Policies() => Get<PoliciesTotal>("api/policies");
+
     public Task<PolicyView> Policy(int id) => Get<PolicyView>($"api/holdings/{id}/policy");
 
     public async Task<PolicySaved> SavePolicy(int id, PolicySetup setup)
