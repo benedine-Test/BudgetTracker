@@ -15,7 +15,7 @@ dotnet run
 
 Every `/api/*` call needs the header `X-Api-Key: <your key>`.
 
-Run the tests with `dotnet test` from the repo root.
+Run the tests with `dotnet test` from the repo root. GitHub runs them on every push to `master` and every pull request (`.github/workflows/ci.yml`); check the PR shows green before publishing.
 
 ## The app screen (Budget.Web)
 
@@ -171,6 +171,6 @@ Things to check in your first week:
 
 ## Next steps
 
-1. Bank email parsers — depends on which banks and cards are used.
-2. Recurring bill / subscription detection.
-3. Automatic price and FX refresh.
+1. Recurring bill / subscription detection.
+2. Automatic price and FX refresh on a schedule.
+3. Publish from GitHub once tests pass, instead of from Visual Studio.
