@@ -24,7 +24,8 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Budget** — what's left from this pay, the three buckets with progress and a daily allowance, where the money went, and earlier pay periods.
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
-- **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
+- **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance, and a salary recorded from base pay adds its CPF (yours and your employer's) to the CPF balance until you type in a new figure; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
+- **Total assets** (linked from Accounts and Invest) — bank and cash balances plus everything under Invest in one figure, with the mix, every item, and net worth after what's owed on cards.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
@@ -72,13 +73,20 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 4. If the file has a balance column, it compares the bank's closing balance with the app's and offers to reset to the bank's figure — the bank is the truth.
 5. **Wrong, or just a test?** The account lists its recent imports with **Undo**: the import's entries are removed (a salary line's budget too), entries it filed are unfiled, and the balance goes back to what it was — unless you've set the balance by hand since, which is kept. Only the latest import of an account can be undone (undo newer ones first). Then fix things and import again. Imports made before this feature existed can't be undone.
 
+**Paying for friends.** Paid S$100 for dinner and your friend owes you half? Open the entry under Spending → *I paid for others too*, enter your share (S$50) and, optionally, who owes the rest.
+- Only your share counts toward the budget, in the pay period you paid, however late they pay you back. The entry keeps its full S$100, so the account balance and statement matching stay right.
+- The rest shows as owed: on the entry, under the **Shared** filter, and as *Friends owe you* on Accounts.
+- When the money comes in (a PayNow, from a statement import or added by hand), open that entry → *Is this someone paying you back?* and pick the bill; bills owed exactly that amount are listed first. It's filed as **Paid Back**, which never counts as income or spend. Paid in cash? Use *They paid me back* on the bill instead. Several part-payments are fine; more than is owed is refused.
+- They won't pay? *They won't pay* turns what's still owed into your spending, in the period you paid the bill.
+- Deleting a bill (or undoing the import that added it) keeps its repayments as Other Income.
+
 **Fixing an entry.** Tap any entry under Spending → *Fix this entry* to change its amount, description or date. A salary's amount or date can't be edited there (it set the period's budget) — delete it and record it again.
 
 What it does for you: card bill payments are filed as **Transfer** so they don't count as spending twice — recognised by their wording ("PAYMENT - THANK YOU", "BILL PAYMENT … CARD/DBSC"), and, when both the bank account and the card are in the app, by pairing money out of the bank with the same amount arriving on the card within 5 days, whatever the bank calls it and whichever statement you import first (undo puts the other side back). A card purchase never pairs with money coming into a bank account; unknown money in is filed as Other Income; a statement `BUS/MRT` charge replaces the S$0 pending taps; a pay credit near a salary you already recorded is flagged ("same one?") instead of doubling your income. Importing the same file twice adds nothing.
 
 Limits: scanned PDFs can't be read. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF or Excel file, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
-**Existing databases** are upgraded on startup (the `Accounts`, `ImportBatches`, `PolicyTerms` and `PolicyValuations` tables and `Transactions.AccountId` / `ImportBatchId` are added if missing), so publishing over the live site keeps your data.
+**Existing databases** are upgraded on startup (the `Accounts`, `ImportBatches`, `PolicyTerms` and `PolicyValuations` tables, `Transactions.AccountId` / `ImportBatchId` / `MyShare` / `SharedWith` / `RepaysId` and the Paid Back category are added if missing), so publishing over the live site keeps your data.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -112,12 +120,18 @@ Things to check in your first week:
 | GET | `/health` | Liveness (no key) |
 | POST | `/api/ingest/apple-pay` | `{amount, merchant, card, date}` all strings → `{message, duplicate, transaction}` |
 | POST | `/api/ingest/card-alert` | Same shape, for parsed bank emails |
-| POST | `/api/income` | `{amount, date, note, kind: "salary"\|"other"\|"refund"}` — salary opens/tops up the period |
+| POST | `/api/income` | `{amount, date, note, kind: "salary"\|"other"\|"refund", cpf?}` — salary opens/tops up the period; `cpf` is added to the CPF holdings |
+| GET/PUT | `/api/profile` | `{birthDate: "yyyy-MM-dd" \| null}` — sets the CPF age band for salaries |
 | GET | `/api/budget/summary?date=yyyy-MM-dd` | Buckets (budget / spent / remaining / % / status / daily allowance), top categories, uncategorised |
 | GET | `/api/budget/history` | Budget vs actual for each recorded pay period |
 | GET | `/api/budget/periods` | All pay periods |
 | GET/PUT | `/api/settings` | `payDay`, `needsPct`, `wantsPct`, `savingsPct` (must total 100) |
-| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled). PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
+| GET/POST/PUT | `/api/transactions[/{id}]` | Filters: `from`, `to`, `categoryId`, `bucket`, `uncategorised`, `q`, `take`, `accountId` (0 = unfiled), `shared`. PUT `{amount?, merchant?, date?, notes?, categoryId?, accountId?}` — `accountId` 0 unfiles; salary amount/date are refused |
+| PUT | `/api/transactions/{id}/share` | `{myShare, sharedWith?}` — only your share counts toward the budget; `myShare: null` makes it all yours again (refused once anything's repaid) |
+| POST | `/api/transactions/{id}/repayments` | `{repaymentId}` links money already in the app, or `{amount, date?, accountId?, note?}` records a new repayment |
+| DELETE | `/api/transactions/{id}/repays` | On a repayment: unlink it (back to Other Income) |
+| POST | `/api/transactions/{id}/write-off` | What's still owed becomes your share |
+| GET | `/api/owed?amount=` | Bills with money owed back, total; those matching `amount` first |
 | POST | `/api/transactions/{id}/categorise` | `{categoryId, learnRule=true, pattern?, applyToSimilar=true}` |
 | DELETE | `/api/transactions/{id}` | |
 | GET/POST/PUT | `/api/categories[/{id}]` | Move a category between Needs / Wants / Savings / Income / Transfer |
@@ -130,7 +144,7 @@ Things to check in your first week:
 | POST/DELETE | `/api/holdings/{id}/policy/valuations[/{valuationId}]` | `{asOf, initialUnits, accumulationUnits}` from a statement |
 | GET | `/api/holdings/{id}/policy/projection?rate=4&rate=8&from=start` | Account and surrender value per policy year (`from=latest` starts at the newest statement) |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
-| GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count |
+| GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count, owed to you by friends |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
 | PUT | `/api/accounts/{id}/balance` | `{balance, asOf?}` — "the bank shows this now" |
 | POST | `/api/accounts/{id}/import/preview` | `{csv, positiveIsSpend?, columns?}`, `{excel: base64, password?, positiveIsSpend?, columns?}` or `{pdf: base64, password?}` → each line matched or missing, bank vs app balance, warnings. Saves nothing |
@@ -150,6 +164,7 @@ Things to check in your first week:
   - **In the portfolio**, cost is premiums due so far and value is the latest statement plus premiums due since, at cost.
   - **In the budget**, the bank text (e.g. `HSBC LIFE`) becomes a rule filing the premium under Investments (Savings bucket); unconfirmed entries already in the app are re-filed. The screen flags months with no bank debit within 15 days of the due date, from the first debit in the app onwards.
   - **Projection** per policy year to the year after the minimum investment period, at two gross returns (default 4% and 8%), from day one or from the latest statement. Each month: premium in (to the IUA with start-up bonus during the initial period, then to the AUA), growth at the gross return less fund charges, IUA/AUA fees off, then account-value bonus into the AUA. It's an illustration, not HSBC's own method; their benefit illustration is the check.
+- **CPF from salary.** A salary recorded with `cpf` (the salary form fills it in when it works pay out from base pay: employee + employer share, 2026 rates, age band from the date of birth on the Profile page when set) adds that amount to the `Cpf` holdings dated on payday. With several (OA/SA/MA) it is shared in proportion to their balances, which is only an estimate; the real split depends on age. Entering a new balance takes in everything before it, and deleting the salary takes its CPF back out. Interest is not added.
 - **Regular contributions.** `contributionMatch` is text the bank entry contains (e.g. `FWD`), optionally narrowed by `contributionAmount` and `contributionAccountId`. Matching spends after the holding's units/cost were last entered are added on top, at cost, until the figures are updated. A typed-in balance (CPF, an ILP's value) takes in every payment made before it. The bank entry has to be in the app first, usually from a statement import.
 
 ## Deploying

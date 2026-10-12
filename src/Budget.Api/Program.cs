@@ -22,6 +22,7 @@ builder.Services.AddScoped<Categorizer>();
 builder.Services.AddScoped<BudgetService>();
 builder.Services.AddScoped<TransactionService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<SharedBills>();
 builder.Services.AddScoped<PriceRefresher>();
 builder.Services.AddHttpClient<IQuoteSource, YahooQuoteSource>(c =>
 {

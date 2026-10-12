@@ -57,7 +57,7 @@ else
 {
     @foreach (var day in items.GroupBy(t => DateOnly.FromDateTime(t.OccurredAt.DateTime)))
     {
-        var spent = day.Where(t => !t.IsIncome && t.Bucket != "Transfer").Sum(t => t.Amount);
+        var spent = day.Where(t => !t.IsIncome && t.Bucket != "Transfer").Sum(t => t.Counted);
         <section class="day">
             <div class="day-head">
                 <h2>@Fmt.Day(day.Key)</h2>
@@ -79,7 +79,11 @@ else
                             }
                             else
                             {
-                                <span class="muted">@t.Category</span>
+                                <span class="muted">@t.Category@(t.MyShare is { } share ? $" · your share {Fmt.Money(share, t.Currency)}" : "")</span>
+                            }
+                            @if (t.Owed > 0)
+                            {
+                                <span class="tag warn">@Fmt.Money(t.Owed.Value, t.Currency) owed@(t.SharedWith is { } who ? $" by {who}" : "")</span>
                             }
                         </span>
                         @if (IsFarePending(t))
@@ -143,6 +147,8 @@ else
                 </div>
             }
         }
+
+        <SharedBill Tx="selected" Accounts="accounts" OnChanged="SharedChanged" />
 
         <h3 class="group-title">Fix this entry</h3>
         <form @onsubmit="SaveEdit" @onsubmit:preventDefault>
@@ -224,7 +230,7 @@ else
     private static readonly (string Value, string Label)[] Filters =
     [
         ("all", "All"), ("sort", "To sort"), ("needs", "Needs"), ("wants", "Wants"),
-        ("savings", "Savings"), ("income", "Income")
+        ("savings", "Savings"), ("income", "Income"), ("shared", "Shared")
     ];
 
     [SupplyParameterFromQuery] public string? Filter { get; set; }
@@ -273,6 +279,7 @@ else
     private string EmptyText => Current switch
     {
         "sort" => "Nothing to sort. Every purchase has a category.",
+        "shared" => "No shared bills. Paid for friends too? Open the entry and tap \"I paid for others too\".",
         _ when !string.IsNullOrWhiteSpace(search) => $"Nothing matches \"{search}\".",
         "all" => "Nothing here yet. Apple Pay taps appear on their own, or use Add.",
         _ => "Nothing in this group for these dates."
@@ -429,6 +436,12 @@ else
         {
             busy = false;
         }
+    }
+
+    private async Task SharedChanged(TransactionDto t)
+    {
+        selected = t;
+        await Load();
     }
 
     private async Task Delete()

@@ -1,0 +1,276 @@
+@* Paying for friends, on one entry. On spending: your share, who owes the rest, repayments, write-off.
+   On money in: link it as someone paying back a shared bill. *@
+@inject Api Api
+@inject Toast Toast
+
+@if (!Tx.IsIncome && Tx.Amount > 0)
+{
+    <h3 class="group-title">Paid for others too?</h3>
+    @if (mode == Mode.Share)
+    {
+        <form @onsubmit="SaveShare" @onsubmit:preventDefault>
+            <label for="sh-mine">Your share (@Tx.Currency)</label>
+            <input id="sh-mine" type="number" inputmode="decimal" step="0.01" min="0" @bind="mine" />
+            <label for="sh-who">Who owes the rest (optional)</label>
+            <input id="sh-who" type="text" autocapitalize="words" placeholder="e.g. Alex" @bind="who" />
+            @if (mine is decimal m && m >= 0 && m < Tx.Amount)
+            {
+                <p class="hint">@Fmt.Money(Tx.Amount - m - Tx.Repaid, Tx.Currency) will show as owed to you.</p>
+            }
+            <p class="hint">Only your share counts toward this pay period's budget, even if they pay you back later.</p>
+            @Error
+            <button type="submit" class="btn primary" disabled="@busy">Save</button>
+            <button type="button" class="link" @onclick="() => Show(Mode.None)">Cancel</button>
+        </form>
+    }
+    else if (Tx.MyShare is null)
+    {
+        <button type="button" class="btn" disabled="@busy" @onclick="StartShare">I paid for others too</button>
+    }
+    else
+    {
+        <p>
+            Your share <strong>@Fmt.Money(Tx.MyShare.Value, Tx.Currency)</strong>
+            @if (Tx.Owed > 0)
+            {
+                <span> · <strong>@Fmt.Money(Tx.Owed.Value, Tx.Currency)</strong> owed@(Tx.SharedWith is { } w ? $" by {w}" : "")</span>
+            }
+            else
+            {
+                <span> · settled</span>
+            }
+            @if (Tx.Repaid > 0)
+            {
+                <span class="muted"> · @Fmt.Money(Tx.Repaid, Tx.Currency) paid back</span>
+            }
+        </p>
+
+        @if (mode == Mode.Repay)
+        {
+            <form @onsubmit="SaveRepayment" @onsubmit:preventDefault>
+                <label for="rp-amount">Amount paid back (@Tx.Currency)</label>
+                <input id="rp-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="repayAmount" />
+                @if (Accounts.Count > 0)
+                {
+                    <label for="rp-acc">Paid into</label>
+                    <select id="rp-acc" @bind="repayAccountId">
+                        <option value="0">Cash / not sure</option>
+                        @foreach (var a in Accounts)
+                        {
+                            <option value="@a.Id">@a.Name</option>
+                        }
+                    </select>
+                }
+                <label for="rp-when">When</label>
+                <input id="rp-when" type="datetime-local" @bind="repayWhen" @bind:format="yyyy-MM-ddTHH:mm" />
+                <p class="hint">Already in the app, e.g. from a bank statement? Open that money-in entry instead and link it here, so it isn't counted twice.</p>
+                @Error
+                <button type="submit" class="btn primary" disabled="@busy">Record it</button>
+                <button type="button" class="link" @onclick="() => Show(Mode.None)">Cancel</button>
+            </form>
+        }
+        else
+        {
+            <div class="chips wrap">
+                @if (Tx.Owed > 0)
+                {
+                    <button type="button" class="chip" disabled="@busy" @onclick="StartRepay">They paid me back</button>
+                }
+                <button type="button" class="chip" disabled="@busy" @onclick="StartShare">Change my share</button>
+                @if (Tx.Owed > 0)
+                {
+                    <button type="button" class="chip" disabled="@busy" @onclick="WriteOff">
+                        @(confirmWriteOff ? "Tap again: count it as mine" : "They won't pay")
+                    </button>
+                }
+                @if (Tx.Repaid == 0)
+                {
+                    <button type="button" class="chip" disabled="@busy" @onclick="Unshare">Not shared after all</button>
+                }
+            </div>
+            @if (confirmWriteOff)
+            {
+                <p class="hint">@Fmt.Money(Tx.Owed ?? 0, Tx.Currency) becomes your spending, in the pay period you paid this bill.</p>
+            }
+            @Error
+        }
+    }
+}
+else if (Tx.IsIncome && Tx.Category != "Salary")
+{
+    @if (Tx.RepaysId is int billId)
+    {
+        <h3 class="group-title">Paying you back</h3>
+        <p>
+            For @(bill is null ? "a shared bill" : $"{bill.Merchant} on {Fmt.Day(DateOnly.FromDateTime(bill.OccurredAt.DateTime))}").
+            It doesn't count as income.
+        </p>
+        @Error
+        <button type="button" class="btn" disabled="@busy" @onclick="Unlink">Not a repayment</button>
+    }
+    else if (open is null)
+    {
+        <button type="button" class="btn" disabled="@busy" @onclick="FindBills">Is this someone paying you back?</button>
+    }
+    else if (open.Count == 0)
+    {
+        <p class="hint">Nothing is owed to you. Open the bill under Spending, tap "I paid for others too" and set your share first.</p>
+    }
+    else
+    {
+        <h3 class="group-title">Which bill does it pay back?</h3>
+        <div class="card rows">
+            @foreach (var o in open)
+            {
+                <button type="button" class="row tx" disabled="@busy" @onclick="() => Link(o)">
+                    <span class="row-main">
+                        <span class="tx-name">@o.Bill.Merchant</span>
+                        <span class="muted">@Fmt.Day(DateOnly.FromDateTime(o.Bill.OccurredAt.DateTime))@(o.Bill.SharedWith is { } w ? $" · {w}" : "")</span>
+                    </span>
+                    <span class="row-end">
+                        <span class="num">@Fmt.Money(o.Owed, o.Bill.Currency) owed</span>
+                        @if (o.Owed < Tx.Amount)
+                        {
+                            <span class="tag warn">Less than this</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+        @Error
+    }
+}
+
+@code {
+    private enum Mode { None, Share, Repay }
+
+    [Parameter, EditorRequired] public TransactionDto Tx { get; set; } = default!;
+    [Parameter] public List<AccountDto> Accounts { get; set; } = [];
+    /// <summary>The entry changed; the list behind should reload.</summary>
+    [Parameter] public EventCallback<TransactionDto> OnChanged { get; set; }
+
+    private Mode mode;
+    private bool busy;
+    private string? error;
+    private bool confirmWriteOff;
+    private decimal? mine;
+    private string? who;
+    private decimal? repayAmount;
+    private int repayAccountId;
+    private DateTime repayWhen;
+    private List<OwedDto>? open;
+    private TransactionDto? bill;
+    private int shownFor;
+
+    private RenderFragment? Error => error is null ? null : @<p class="field-error" role="alert">@error</p>;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (shownFor == Tx.Id) return;
+        shownFor = Tx.Id;
+        mode = Mode.None;
+        error = null;
+        confirmWriteOff = false;
+        open = null;
+        bill = null;
+        if (Tx.RepaysId is int id)
+        {
+            try { bill = await Api.Transaction(id); }
+            catch (ApiException) { /* shown as "a shared bill" */ }
+        }
+    }
+
+    private void Show(Mode m)
+    {
+        mode = m;
+        error = null;
+        confirmWriteOff = false;
+    }
+
+    private void StartShare()
+    {
+        mine = Tx.MyShare;
+        who = Tx.SharedWith;
+        Show(Mode.Share);
+    }
+
+    private void StartRepay()
+    {
+        repayAmount = Tx.Owed;
+        repayAccountId = Tx.AccountId ?? 0;
+        var now = DateTime.Now;
+        repayWhen = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0);
+        Show(Mode.Repay);
+    }
+
+    private Task SaveShare()
+    {
+        if (mine is not >= 0) { error = "Enter your share (0 if none of it was yours)."; return Task.CompletedTask; }
+        return Run(() => Api.SetShare(Tx.Id, mine, string.IsNullOrWhiteSpace(who) ? null : who.Trim()), "Saved. Only your share counts now.");
+    }
+
+    private Task SaveRepayment()
+    {
+        if (repayAmount is not > 0) { error = "Enter an amount above zero."; return Task.CompletedTask; }
+        // Send the phone's own offset so the time is right even when travelling.
+        var when = new DateTimeOffset(DateTime.SpecifyKind(repayWhen, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(repayWhen));
+        return Run(async () =>
+        {
+            await Api.RecordRepayment(Tx.Id, repayAmount.Value,
+                when.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture),
+                repayAccountId == 0 ? null : repayAccountId);
+            return await Api.Transaction(Tx.Id);
+        }, "Repayment recorded.");
+    }
+
+    private Task WriteOff()
+    {
+        if (!confirmWriteOff)
+        {
+            confirmWriteOff = true;
+            return Task.CompletedTask;
+        }
+        return Run(() => Api.WriteOff(Tx.Id), "Counted as your spending.");
+    }
+
+    private Task Unshare() => Run(() => Api.SetShare(Tx.Id, null, null), "All of it counts as yours again.");
+
+    private async Task FindBills()
+    {
+        busy = true;
+        error = null;
+        try { open = (await Api.Owed(Tx.Amount)).Bills; }
+        catch (ApiException e) { error = e.Message; }
+        finally { busy = false; }
+    }
+
+    private Task Link(OwedDto o) => Run(() => Api.LinkRepayment(o.Bill.Id, Tx.Id), $"Linked to {o.Bill.Merchant}.");
+
+    private Task Unlink() => Run(async () =>
+    {
+        await Api.UnlinkRepayment(Tx.Id);
+        return await Api.Transaction(Tx.Id);
+    }, "Filed as Other Income.");
+
+    private async Task Run(Func<Task<TransactionDto>> change, string done)
+    {
+        if (busy) return;
+        busy = true;
+        error = null;
+        try
+        {
+            var updated = await change();
+            Toast.Show(done);
+            shownFor = 0; // show the updated entry fresh
+            await OnChanged.InvokeAsync(updated);
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

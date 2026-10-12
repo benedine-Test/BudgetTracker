@@ -1,0 +1,86 @@
+@page "/profile"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Profile</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Profile</h1>
+        <div class="sub"><a href="settings">‹ Settings</a></div>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (!loaded)
+{
+    <Loading />
+}
+else
+{
+    <section class="card">
+        <h2>About you</h2>
+        <form @onsubmit="Save" @onsubmit:preventDefault>
+            <label for="p-dob">Date of birth</label>
+            <input id="p-dob" type="date" @bind="birthDate" @bind:format="yyyy-MM-dd" max="@Fmt.Iso(Fmt.Today)" />
+            @if (birthDate is { } d)
+            {
+                var dob = DateOnly.FromDateTime(d);
+                <p class="hint">
+                    Age @Payslip.AgeOn(dob, Fmt.Today). CPF rates on pay this month: @Payslip.BandName(Payslip.AgeBandOn(dob, Fmt.Today)).
+                    @if (Payslip.NextBandChange(dob, Fmt.Today) is { } next)
+                    {
+                        <text>Moves to @Payslip.BandName(next.Band) from @next.From.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture).</text>
+                    }
+                </p>
+            }
+            <p class="hint">Sets your CPF rates when you record salary from base pay, moving to the next rate the month after you turn 55, 60, 65 and 70. Kept on the server, so every phone you use has it.</p>
+            <button type="submit" class="btn primary" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+        </form>
+    </section>
+}
+
+@code {
+    private bool loaded;
+    private bool busy;
+    private string? error;
+    private DateTime? birthDate;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            birthDate = (await Api.Profile()).BirthDate?.ToDateTime(TimeOnly.MinValue);
+            loaded = true;
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            await Api.SaveProfile(new ProfileDto(birthDate is { } d ? DateOnly.FromDateTime(d) : null));
+            Toast.Show(birthDate is null ? "Date of birth removed." : "Saved. Your next salary uses it.");
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

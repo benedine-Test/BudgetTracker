@@ -91,6 +91,59 @@ public class ContributionTests
         Assert.Equal(100m, h.NotInFiguresBase);
     }
 
+    private static Holding Cpf(int id, decimal balance) => new()
+    {
+        Id = id, Symbol = "CPF", AssetClass = AssetClass.Cpf, Units = 1, AverageCost = balance,
+        LastPrice = balance, LastPriceAtUtc = Day1, FiguresAsOfUtc = Day1
+    };
+
+    private static Transaction Salary(int id, int day, decimal? cpf) =>
+        new() { Id = id, Merchant = "Salary", Amount = 4000m, IsIncome = true, OccurredAtUtc = Day1.AddDays(day - 1), CpfContribution = cpf };
+
+    [Fact]
+    public void Salary_cpf_is_shared_across_cpf_holdings_by_balance()
+    {
+        var oa = Cpf(1, 60000m);
+        var sa = Cpf(2, 30000m);
+        var ma = Cpf(3, 10000m);
+        var etf = new Holding { Id = 4, AssetClass = AssetClass.Etf, Units = 10, AverageCost = 100m };
+
+        var c = Portfolio.SalaryCpf([etf, ma, sa, oa], [Salary(1, 25, 1850m), Salary(2, 26, null)]);
+
+        Assert.All(c, x => Assert.True(x.FromSalary));
+        Assert.Equal([1110m, 555m, 185m], c.OrderBy(x => x.HoldingId).Select(x => x.Amount));
+    }
+
+    [Fact]
+    public void Salary_cpf_shares_add_up_to_the_cent()
+    {
+        var c = Portfolio.SalaryCpf([Cpf(1, 1000m), Cpf(2, 2000m)], [Salary(1, 25, 100m)]);
+        Assert.Equal([33.33m, 66.67m], c.Select(x => x.Amount));
+
+        // No balances typed in yet: shared equally.
+        c = Portfolio.SalaryCpf([Cpf(1, 0m), Cpf(2, 0m)], [Salary(1, 25, 100m)]);
+        Assert.Equal([50m, 50m], c.Select(x => x.Amount));
+    }
+
+    [Fact]
+    public void Salary_cpf_is_added_on_top_of_a_balance_until_a_new_one_is_entered()
+    {
+        var oa = Cpf(1, 50000m);
+        var c = Portfolio.SalaryCpf([oa], [Salary(1, -5, 1850m), Salary(2, 25, 1850m)]);
+
+        var h = Portfolio.Summarise([oa], c, Day1.AddDays(26)).Holdings.Single();
+        Assert.Equal(51850m, h.MarketValueBase);           // the earlier salary is already in the balance
+        Assert.Equal(1850m, h.SalaryCpfNotInBalanceBase);
+        Assert.Equal(0, h.ContributionCount);              // bank payments only
+
+        // New figure from the CPF app after payday: it includes that salary's CPF.
+        oa.LastPrice = 52100m;
+        oa.LastPriceAtUtc = Day1.AddDays(27);
+        h = Portfolio.Summarise([oa], c, Day1.AddDays(28)).Holdings.Single();
+        Assert.Equal(52100m, h.MarketValueBase);
+        Assert.Equal(0m, h.SalaryCpfNotInBalanceBase);
+    }
+
     [Theory]
     [InlineData(612.5, "GBp", "GBP", 6.125)]
     [InlineData(120.4, "USD", "USD", 120.4)]
@@ -216,6 +269,25 @@ public sealed class PriceRefreshTests : IDisposable
         Assert.Equal(2, c.Count);
         Assert.Equal(600m, c.Sum(x => x.Amount));
     }
+
+    [Fact]
+    public async Task Cpf_on_a_recorded_salary_reaches_the_cpf_holding()
+    {
+        _db.Holdings.Add(new Holding
+        {
+            Symbol = "CPF", Name = "CPF Ordinary Account", AssetClass = AssetClass.Cpf, Units = 1, AverageCost = 20000m,
+            LastPrice = 20000m, LastPriceAtUtc = DateTime.UtcNow.AddDays(-10), FiguresAsOfUtc = DateTime.UtcNow.AddDays(-10)
+        });
+        await _db.SaveChangesAsync();
+        var budgets = new BudgetService(_db, _clock);
+        await budgets.RecordSalaryAsync(3198.50m, DateTime.UtcNow.AddDays(-1), null, cpfContribution: 1480m);
+        await budgets.RecordSalaryAsync(500m, DateTime.UtcNow.AddDays(-1), "typed take-home, no CPF");
+
+        var holdings = await _db.Holdings.AsNoTracking().ToListAsync();
+        var summary = Portfolio.Summarise(holdings, await BudgetEndpoints.ContributionsAsync(_db, holdings, "SGD", default), DateTime.UtcNow);
+
+        Assert.Equal(21480m, summary.Holdings.Single().MarketValueBase);
+    }
 }
 
 public class YahooQuoteSourceTests
@@ -304,5 +376,32 @@ public class HoldingSchemaUpgradeTests
         Assert.Equal(0L, check.ExecuteScalar());
         check.CommandText = """SELECT COUNT(*) FROM pragma_table_info('Holdings') WHERE name LIKE 'Contribution%'""";
         Assert.Equal(3L, check.ExecuteScalar());
+        check.CommandText = """SELECT COUNT(*) FROM pragma_table_info('Transactions') WHERE name = 'CpfContribution'""";
+        Assert.Equal(1L, check.ExecuteScalar());
+    }
+
+    [Fact]
+    public async Task Adds_date_of_birth_to_existing_settings()
+    {
+        using var conn = new SqliteConnection("Data Source=:memory:");
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE "Transactions" ("Id" INTEGER NOT NULL CONSTRAINT "PK_Transactions" PRIMARY KEY AUTOINCREMENT,
+                  "Amount" TEXT NOT NULL, "Merchant" TEXT NOT NULL);
+                CREATE TABLE "Settings" ("Id" INTEGER NOT NULL CONSTRAINT "PK_Settings" PRIMARY KEY AUTOINCREMENT, "PayDay" INTEGER NOT NULL);
+                INSERT INTO "Settings" ("Id", "PayDay") VALUES (1, 25);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        using var db = new BudgetDbContext(new DbContextOptionsBuilder<BudgetDbContext>().UseSqlite(conn).Options);
+        await SchemaUpgrade.ApplyAsync(db);
+        await SchemaUpgrade.ApplyAsync(db);
+
+        using var check = conn.CreateCommand();
+        check.CommandText = """UPDATE "Settings" SET "BirthDate" = '1990-06-15'; SELECT "BirthDate" FROM "Settings" """;
+        Assert.Equal("1990-06-15", check.ExecuteScalar());
     }
 }

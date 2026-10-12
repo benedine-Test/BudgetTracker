@@ -37,6 +37,7 @@ else
         {
             <span class="sub">@Fmt.Money(s.OwedOnCards) owed on cards · @Fmt.Money(s.Net) after paying them</span>
         }
+        <span class="sub"><a class="link" style="margin-left:0" href="assets">Total assets with investments ›</a></span>
     </section>
 
     @if (s.UnassignedSinceOldest > 0)
@@ -45,6 +46,16 @@ else
             <span>
                 <strong>@s.UnassignedSinceOldest @(s.UnassignedSinceOldest == 1 ? "entry isn't" : "entries aren't") filed under an account</strong>
                 <span class="muted">Balances can't include @(s.UnassignedSinceOldest == 1 ? "it" : "them") until you pick one. Add card names to an account to file taps automatically.</span>
+            </span>
+        </a>
+    }
+
+    @if (s.OwedToYou > 0)
+    {
+        <a class="card banner" href="transactions?filter=shared">
+            <span>
+                <strong>Friends owe you @Fmt.Money(s.OwedToYou)</strong>
+                <span class="muted">For bills you paid for them too. Not in the total until it's paid back.</span>
             </span>
         </a>
     }

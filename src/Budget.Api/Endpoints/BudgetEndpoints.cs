@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Budget.Api.Endpoints;
 
 public record SettingsUpdate(int? PayDay, decimal? NeedsPct, decimal? WantsPct, decimal? SavingsPct);
+/// <summary>BirthDate null clears it.</summary>
+public record ProfileUpdate(DateOnly? BirthDate);
 public record CategoryUpsert(string Name, Bucket Bucket, bool? IsArchived);
 public record RuleCreate(string Pattern, int CategoryId, int? Priority);
 public record HoldingUpsert(string Symbol, string Name, AssetClass AssetClass, string? Platform,
@@ -57,6 +59,20 @@ public static class BudgetEndpoints
             (s.NeedsPct, s.WantsPct, s.SavingsPct) = (needs, wants, savings);
             await db.SaveChangesAsync(ct);
             return Results.Ok(s);
+        });
+
+        // ---- Profile ----
+        api.MapGet("/profile", async (BudgetService svc, CancellationToken ct) =>
+            new { (await svc.GetSettingsAsync(ct)).BirthDate });
+
+        api.MapPut("/profile", async (ProfileUpdate body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
+        {
+            if (body.BirthDate is { } d && (d > clock.Today || d.Year < 1900))
+                return Results.BadRequest(new { message = "That date of birth doesn't look right." });
+            var s = await db.Settings.SingleAsync(x => x.Id == 1, ct);
+            s.BirthDate = body.BirthDate;
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { s.BirthDate });
         });
 
         // ---- Categories ----
@@ -168,12 +184,12 @@ public static class BudgetEndpoints
         {
             var rows = await db.Transactions.AsNoTracking().Include(t => t.Category).Include(t => t.Account)
                 .OrderBy(t => t.OccurredAtUtc).ToListAsync(ct);
-            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Account,Card,Source,Notes\n");
-            foreach (var t in rows.Select(TransactionEndpoints.ToDto))
+            var sb = new StringBuilder("Date,Amount,Currency,Type,Merchant,Category,Bucket,Account,Card,Source,Notes,MyShare,SharedWith\n");
+            foreach (var t in rows.Select(r => TransactionEndpoints.ToDto(r)))
                 sb.AppendLine(string.Join(',',
                     t.OccurredAt.ToString("yyyy-MM-dd HH:mm"), t.Amount.ToString("0.00"), t.Currency,
                     t.IsIncome ? "Income" : "Spend", Csv(t.Merchant), Csv(t.Category), t.Bucket ?? "",
-                    Csv(t.Account), Csv(t.Card), t.Source, Csv(t.Notes)));
+                    Csv(t.Account), Csv(t.Card), t.Source, Csv(t.Notes), t.MyShare?.ToString("0.00") ?? "", Csv(t.SharedWith)));
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "transactions.csv");
         });
     }
@@ -223,8 +239,21 @@ public static class BudgetEndpoints
         }
     }
 
-    /// <summary>Bank entries that paid into a holding with a contribution rule (see Portfolio.MatchContributions).</summary>
+    /// <summary>
+    /// Bank entries that paid into a holding with a contribution rule (see Portfolio.MatchContributions),
+    /// plus the CPF paid on salaries, which goes to the CPF holdings (see Portfolio.SalaryCpf).
+    /// </summary>
     public static async Task<IReadOnlyList<Contribution>> ContributionsAsync(
+        BudgetDbContext db, List<Holding> holdings, string baseCurrency, CancellationToken ct)
+    {
+        var salaryCpf = holdings.Any(h => h.AssetClass == AssetClass.Cpf)
+            ? Portfolio.SalaryCpf(holdings, await db.Transactions.AsNoTracking()
+                .Where(t => t.IsIncome && t.CpfContribution != null).ToListAsync(ct))
+            : [];
+        return [.. await BankContributionsAsync(db, holdings, baseCurrency, ct), .. salaryCpf];
+    }
+
+    private static async Task<IReadOnlyList<Contribution>> BankContributionsAsync(
         BudgetDbContext db, List<Holding> holdings, string baseCurrency, CancellationToken ct)
     {
         var texts = holdings.Where(h => !string.IsNullOrWhiteSpace(h.ContributionMatch))

@@ -24,11 +24,16 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
         b.Entity<Transaction>(e =>
         {
             e.Property(t => t.Amount).HasPrecision(18, 2);
+            e.Property(t => t.CpfContribution).HasPrecision(18, 2);
             e.Property(t => t.Merchant).HasMaxLength(200);
             e.HasIndex(t => t.OccurredAtUtc);
             // Deleting an account keeps its history, just unlinked.
             e.HasOne(t => t.Account).WithMany().HasForeignKey(t => t.AccountId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(t => t.ImportBatchId);
+            e.Property(t => t.MyShare).HasPrecision(18, 2);
+            e.Property(t => t.SharedWith).HasMaxLength(100);
+            e.HasIndex(t => t.RepaysId);
+            e.Ignore(t => t.CountedAmount);
         });
 
         b.Entity<Account>(e =>

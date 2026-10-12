@@ -1,0 +1,194 @@
+@page "/assets"
+@inject Api Api
+
+<PageTitle>Total assets</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Total assets</h1>
+        <p class="sub">Bank accounts, investments and CPF together</p>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (acc is null || p is null)
+{
+    <Loading />
+}
+else if (acc.Accounts.Count == 0 && p.Holdings.Count == 0)
+{
+    <section class="card notice">
+        <h2>Nothing to add up yet</h2>
+        <p>Add your bank accounts under Accounts and your holdings, CPF and savings under Invest. They're totalled here.</p>
+        <a class="btn primary" href="accounts">Go to Accounts</a>
+    </section>
+}
+else
+{
+    var groups = Groups();
+    var total = groups.Sum(g => g.Value);
+
+    <section class="card hero">
+        <span class="label">What you own</span>
+        <span class="big">@Fmt.Money(total)</span>
+        @if (acc.OwedOnCards != 0)
+        {
+            <span class="sub">@Fmt.Money(acc.OwedOnCards) owed on cards · @Fmt.Money(total - acc.OwedOnCards) net worth</span>
+        }
+        @if (refreshing)
+        {
+            <span class="sub">Updating prices…</span>
+        }
+    </section>
+
+    @if (total > 0)
+    {
+        <section class="card">
+            <h2>Mix</h2>
+            <div class="stack" aria-hidden="true">
+                @for (var i = 0; i < groups.Count; i++)
+                {
+                    <span class="slice s@(i % 7)" style="width:@Width(groups[i].Value / total * 100)"></span>
+                }
+            </div>
+            <ul class="legend">
+                @for (var i = 0; i < groups.Count; i++)
+                {
+                    var g = groups[i];
+                    <li>
+                        <span class="swatch s@(i % 7)" aria-hidden="true"></span>
+                        <span>@g.Name</span>
+                        <span class="num">@Fmt.Percent(Math.Round(g.Value / total * 100, 1))</span>
+                        <span class="num muted">@Fmt.Money(g.Value)</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (Banks.Any())
+    {
+        <section>
+            <div class="day-head"><h2>Bank and cash</h2><a href="accounts">Accounts ›</a></div>
+            <div class="card rows">
+                @foreach (var a in Banks)
+                {
+                    <a class="row" href="accounts">
+                        <span class="row-main">
+                            <span class="tx-name">@a.Name</span>
+                            <span class="muted">@(a.Kind == "Cash" ? "Cash" : "Bank account")</span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num @(a.Balance < 0 ? "neg" : "")">@Fmt.Money(a.Balance)</span>
+                        </span>
+                    </a>
+                }
+            </div>
+        </section>
+    }
+
+    @if (p.Holdings.Count > 0)
+    {
+        <section>
+            <div class="day-head"><h2>Investments, CPF and savings</h2><a href="invest">Invest ›</a></div>
+            <div class="card rows">
+                @foreach (var h in p.Holdings.OrderByDescending(h => h.MarketValueBase))
+                {
+                    <a class="row" href="invest">
+                        <span class="row-main">
+                            <span class="tx-name">@h.Name</span>
+                            <span class="muted">@Fmt.AssetClass(h.AssetClass)@(string.IsNullOrWhiteSpace(h.Platform) ? "" : $" · {h.Platform}")</span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num">@Fmt.Money(h.MarketValueBase)</span>
+                        </span>
+                    </a>
+                }
+            </div>
+        </section>
+    }
+
+    @if (acc.OwedToYou > 0)
+    {
+        <p class="hint center">Friends owe you @Fmt.Money(acc.OwedToYou). It's not counted until it's paid back.</p>
+    }
+    @if (p.Holdings.Any(h => h.AssetClass == "Cash") && Banks.Any())
+    {
+        <p class="hint center">Savings entered under Invest are added on top of your bank balances. If one is money already sitting in a bank account here, it's counted twice — remove one of them.</p>
+    }
+    @if (acc.Accounts.Any(a => !a.IsArchived && a.Currency != acc.Currency))
+    {
+        <p class="hint center">Bank balances other than @acc.Currency aren't in the total.</p>
+    }
+}
+
+@code {
+    private record Group(string Name, decimal Value);
+
+    private AccountsSummary? acc;
+    private PortfolioSummary? p;
+    private string? error;
+    private bool refreshing;
+
+    /// <summary>Bank and cash accounts counted in the total: cards are debts, and other currencies aren't converted.</summary>
+    private IEnumerable<AccountDto> Banks => acc is null ? Enumerable.Empty<AccountDto>() :
+        acc.Accounts.Where(a => !a.IsArchived && a.Kind != "CreditCard" && a.Currency == acc.Currency);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        await RefreshPrices();
+    }
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            var accounts = Api.Accounts();
+            var portfolio = Api.Portfolio();
+            acc = await accounts;
+            p = await portfolio;
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    /// <summary>Same as the Invest screen: prices update on open, and the server skips ones fetched in the last few minutes.</summary>
+    private async Task RefreshPrices()
+    {
+        if (p is null || !p.Holdings.Any(h => h.AutoPrice)) return;
+        refreshing = true;
+        StateHasChanged();
+        try
+        {
+            var r = await Api.RefreshPrices(false);
+            if (r.Updated > 0 || r.Failed > 0) p = await Api.Portfolio();
+        }
+        catch (ApiException)
+        {
+            // The total still shows with the last prices.
+        }
+        finally
+        {
+            refreshing = false;
+        }
+    }
+
+    /// <summary>Bank balances, then the Invest mix (CPF, cash, ETFs, …), largest first.</summary>
+    private List<Group> Groups()
+    {
+        var groups = new List<Group>();
+        if (Banks.Any()) groups.Add(new Group("Bank and cash", acc!.InAccounts));
+        groups.AddRange(p!.Allocation.Select(a => new Group(Fmt.AssetClass(a.AssetClass), a.ValueBase)));
+        return groups.Where(g => g.Value != 0).OrderByDescending(g => g.Value).ToList();
+    }
+
+    private static string Width(decimal percent) =>
+        Math.Clamp(percent, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+}
