@@ -224,7 +224,7 @@ public class FwdPolicyTests
         Assert.InRange(rows[2].AccountValue, 14_847m - 15, 14_847m + 15);
     }
 
-    /// <summary>The bank's text for an FWD premium, as the OCBC app shows it (policy number made up).</summary>
+    /// <summary>The bank's text for an FWD premium, as the UOB app shows it (policy number made up).</summary>
     private const string FwdDebit = "Inward DR - GIRO 12345678-20261021 OTHR 12345678 FWD SINGAPORE PTE.";
 
     [Theory]
@@ -242,7 +242,7 @@ public class FwdPolicyTests
     [Fact]
     public void FWD_debits_taken_9_days_before_the_due_date_count_for_that_month()
     {
-        // OCBC takes the 21 Oct premium on 12 Oct; earlier months on about the same lead.
+        // UOB takes the 21 Oct premium on 12 Oct; earlier months on about the same lead.
         var debits = new[] { new DateOnly(2026, 8, 12), new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12) };
         Assert.Empty(PolicyMath.MissedPremiums(Start, debits, new DateOnly(2026, 11, 10), 30));
         // Drop September's: it is flagged, not taken as October's.
