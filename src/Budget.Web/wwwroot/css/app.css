@@ -357,15 +357,29 @@ form > .three:first-child label, form > .two:first-child label { margin-top: 0; 
 
 /* ---- Insurance plan (ILP) ---- */
 .back { display: inline-block; margin: 0 0 6px; }
-.facts { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 12px 0 0; font-size: 15px; }
-.facts dt, .facts dd { margin: 0; }
-.facts dd { text-align: right; }
+.facts { display: grid; grid-template-columns: 1fr auto; margin: 14px 0 0; font-size: 15px; }
+.facts dt, .facts dd { margin: 0; padding: 9px 0; border-top: 1px solid var(--line); }
+.facts dt { color: var(--muted); }
+.facts dd { text-align: right; font-weight: 600; padding-left: 12px; }
+/* The last pair is the bottom line (gap to premiums paid): set it apart like a total. */
+.facts dt:last-of-type, .facts dd:last-of-type { border-top: 2px solid var(--line); }
+.facts dt:last-of-type { color: var(--text); font-weight: 600; }
+.hero .facts + .rows { margin-top: 10px; padding-top: 4px; border-top: 1px solid var(--line); }
+.hero .row-end .num { font-weight: 600; }
 .proj-from { margin-top: 12px; }
-.table-wrap { overflow-x: auto; margin: 10px -4px 0; }
+.table-wrap { overflow-x: auto; margin: 10px -4px 0; -webkit-overflow-scrolling: touch; }
 table.proj { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-table.proj th { font-weight: 600; color: var(--muted); padding: 4px; text-align: right; white-space: nowrap; }
-table.proj td { padding: 5px 4px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
-table.proj th:first-child, table.proj td:first-child { text-align: left; }
+table.proj th { font-weight: 600; color: var(--muted); padding: 4px 8px; text-align: right; white-space: nowrap; font-size: 12px; }
+table.proj thead tr:first-child th[colspan] { text-align: center; color: var(--text); border-bottom: 1px solid var(--line); }
+table.proj thead tr:last-child th { border-bottom: 2px solid var(--line); }
+table.proj td { padding: 6px 8px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+table.proj tbody tr:first-child td { border-top: 0; }
+table.proj tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--track) 45%, transparent); }
+table.proj th:first-child, table.proj td:first-child { text-align: left; color: var(--muted); padding-left: 4px; }
+table.proj td:nth-child(2) { color: var(--muted); }
+table.proj .grp { border-left: 1px solid var(--line); }
+table.proj td.pos { font-weight: 600; }
+table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transparent) !important; border-radius: 6px; }
 .rate-row { display: grid; grid-template-columns: 1fr 56px 56px 64px auto; gap: 6px; align-items: center; margin-top: 6px; }
 .rate-row.funds { grid-template-columns: 1fr 64px 64px auto; }
 .rate-row input { min-height: 40px; padding: 0 8px; font-size: 16px; }

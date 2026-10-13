@@ -56,7 +56,12 @@ using (var scope = app.Services.CreateScope())
 
 // The app screen (Budget.Web) is served from this same site, so one publish deploys both.
 app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
+// Ask the browser to recheck each file before reusing it. app.css and app.js keep the same name across
+// deploys, so without this a home-screen app keeps showing the old styles. Unchanged files come back as 304.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache"
+});
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
