@@ -86,6 +86,14 @@ public static partial class StatementParser
         var dirCol = Col(map.Direction);
         var balanceCol = Col(map.Balance);
 
+        // Card downloads can start with charges that haven't posted yet: they have a transaction
+        // date but no posting date. They may still change or be reversed, so leave them for the
+        // next download, which lists them once they've posted.
+        var postingCol = headers.FindIndex(h => IsPostingDateHeader(Key(h)));
+        if (postingCol == dateCol) postingCol = -1;
+        var hasPosted = postingCol >= 0 && dataLines.Any(r => postingCol < r.Count && TryParseDate(r[postingCol].Trim(), out _));
+        var pending = 0;
+
         var rows = new List<StatementRow>();
         var skipped = 0;
         for (var i = 0; i < dataLines.Count; i++)
@@ -96,6 +104,7 @@ public static partial class StatementParser
 
             // Summary lines ("Balance brought forward", totals) have no date: not a transaction.
             if (!TryParseDate(Cell(dateCol), out var date)) { skipped++; continue; }
+            if (hasPosted && Cell(postingCol).Length == 0) { pending++; skipped++; continue; }
 
             decimal amount;
             bool isCredit;
@@ -119,7 +128,7 @@ public static partial class StatementParser
             }
 
             var description = string.Join(' ', descCols.Select(Cell).Where(s => s.Length > 0));
-            description = Spaces().Replace(description, " ").Trim();
+            description = Spaces().Replace(RefNo().Replace(description, " "), " ").Trim();
             if (description.Length == 0) description = isCredit ? "Money in" : "Money out";
             if (description.Length > 200) description = description[..200];
 
@@ -135,7 +144,11 @@ public static partial class StatementParser
         var latest = newestFirst ? rows[0] : rows[^1];
         var withBalance = (newestFirst ? rows : Enumerable.Reverse(rows)).FirstOrDefault(r => r.Balance is not null && r.Date == latest.Date);
 
-        return new ParsedStatement(headers, map, rows, skipped, withBalance?.Balance, withBalance?.Date, null);
+        return new ParsedStatement(headers, map, rows, skipped, withBalance?.Balance, withBalance?.Date, null)
+        {
+            Warning = pending == 0 ? null
+                : $"Left out {pending} pending charge{(pending == 1 ? "" : "s")}. They'll come in with your next download once they've posted."
+        };
     }
 
     private static ParsedStatement Fail(string message, IReadOnlyList<string>? headers = null, ColumnMap? map = null) =>
@@ -154,6 +167,7 @@ public static partial class StatementParser
         k is "dr/cr" or "cr/dr" or "debit/credit" or "credit/debit" or "d/c" or "c/d" or "type" or "transaction type";
     private static bool IsAmountHeader(string k) => k.Contains("amount") && !IsDebitHeader(k) && !IsCreditHeader(k);
     private static bool IsBalanceHeader(string k) => k.Contains("balance");
+    private static bool IsPostingDateHeader(string k) => IsDateHeader(k) && k.Contains("post");
     private static bool IsForeignHeader(string k) => k.Contains("foreign") || k.Contains("original") || k.Contains("fcy");
     private static bool IsDescriptionHeader(string k) =>
         !IsDateHeader(k) && !IsAmountHeader(k) &&
@@ -329,6 +343,13 @@ public static partial class StatementParser
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Spaces();
+
+    /// <summary>
+    /// A per-transaction reference ("Ref No: 74541836283288086502413") on the end of a description.
+    /// It's different on every line, so it only gets in the way of recognising the merchant.
+    /// </summary>
+    [GeneratedRegex(@"\bRef\s*No\.?\s*:?\s*\d{10,}\b", RegexOptions.IgnoreCase)]
+    private static partial Regex RefNo();
 
     [GeneratedRegex(@"\s*\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*(AM|PM|am|pm)?\s*$")]
     private static partial Regex TimePart();
