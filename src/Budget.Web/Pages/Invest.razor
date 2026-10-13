@@ -38,6 +38,10 @@ else
             </span>
             on @Fmt.Money(p.TotalCostBase) put in
         </p>
+        @if (p.Holdings.Any(h => h.SurrenderValueBase is not null))
+        {
+            <p class="sub">The gain counts insurance plans at what surrendering would pay out; the total shows their policy value.</p>
+        }
         <p class="sub"><a class="link" style="margin-left:0" href="assets">Total assets with bank accounts ›</a></p>
         @if (p.Holdings.Any(h => h.AutoPrice))
         {
@@ -72,6 +76,58 @@ else
             }
         </ul>
     </section>
+
+    @if (ilps is { Policies.Count: > 0 })
+    {
+        <section class="card hero">
+            <p class="label">Insurance plans, total policy value</p>
+            @if (ilps.WithoutStatement < ilps.Policies.Count)
+            {
+                <p class="big">@Fmt.Money(ilps.PolicyValue)</p>
+                <p class="sub">@Fmt.Money(ilps.SurrenderValue) if surrendered · @Fmt.Money(ilps.PremiumsPaid) paid in</p>
+            }
+            else
+            {
+                <p class="big">@Fmt.Money(ilps.PremiumsPaid)</p>
+                <p class="sub">paid in so far. Enter each plan's statement to see what it's worth.</p>
+            }
+            <dl class="facts">
+                <dt>Monthly premiums</dt><dd class="num">@Fmt.Money(ilps.MonthlyPremium)</dd>
+                <dt>Premiums paid so far</dt><dd class="num">@Fmt.Money(ilps.PremiumsPaid)</dd>
+                @if (ilps.WithoutStatement < ilps.Policies.Count)
+                {
+                    <dt>Surrender value</dt><dd class="num">@Fmt.Money(ilps.SurrenderValue)</dd>
+                    <dt>@(ilps.Gap > 0 ? "Short of premiums paid by" : "Ahead of premiums paid by")</dt>
+                    <dd class="num @(ilps.Gap > 0 ? "neg" : "pos")">@Fmt.Money(Math.Abs(ilps.Gap))</dd>
+                }
+            </dl>
+            <div class="rows">
+                @foreach (var l in ilps.Policies)
+                {
+                    <a class="row" href="invest/policy/@l.HoldingId">
+                        <span class="row-main">
+                            <span class="tx-name">@l.Name</span>
+                            <span class="muted small">
+                                @Fmt.Money(l.MonthlyPremium) a month · year @l.PolicyYear ·
+                                @(l.StatementDate is { } d ? $"statement {d.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)}" : "no statement yet")
+                            </span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num">@(l.SurrenderValue is { } sv ? Fmt.Money(sv) : "—")</span>
+                            <span class="muted small">surrender</span>
+                        </span>
+                    </a>
+                }
+            </div>
+            <p class="hint">
+                Values from each plan's latest statement, compared with the premiums paid up to that statement's date.
+                @if (ilps.WithoutStatement > 0)
+                {
+                    <text>@ilps.WithoutStatement without a statement yet @(ilps.WithoutStatement == 1 ? "isn't" : "aren't") in the values.</text>
+                }
+            </p>
+        </section>
+    }
 
     <section>
         <div class="day-head"><h2>Holdings</h2></div>
@@ -114,6 +170,10 @@ else
                         {
                             <span class="muted small">@Fmt.Money(h.NotInFiguresBase) paid in since you last entered units, counted at cost</span>
                         }
+                        @if (h.SurrenderValueBase is { } surrender)
+                        {
+                            <span class="muted small">@Fmt.Money(surrender) if surrendered · gain shown on this</span>
+                        }
                     </span>
                     <span class="row-end">
                         <span class="num">@Fmt.Money(h.MarketValueBase)</span>
@@ -152,10 +212,26 @@ else
                     <p class="hint">The figure in the CPF app. Salaries recorded from base pay add their CPF (yours and your employer's) on top until you enter a new figure. Interest isn't added, so update it now and then.</p>
                 }
             }
+            else if (IsPolicy && found is { HasPolicyTerms: true })
+            {
+                <label for="h-name">Name</label>
+                <input id="h-name" type="text" @bind="name" />
+                <p class="hint">
+                    What you've paid in comes from the policy's premium schedule, and its value from the statements you enter.
+                    <a class="link" href="invest/policy/@editId">Policy details</a>
+                </p>
+            }
             else if (IsPolicy)
             {
                 <label for="h-name">Name</label>
                 <input id="h-name" type="text" placeholder="FWD Invest First Plus" @bind="name" />
+                @if (editId is not null)
+                {
+                    <p class="hint">
+                        Have the contract? Set up its terms to see the surrender value and a projection.
+                        <a class="link" href="invest/policy/@editId">Policy details</a>
+                    </p>
+                }
 
                 <label for="h-paid">Total paid in so far (S$)</label>
                 <input id="h-paid" type="number" inputmode="decimal" step="0.01" min="0" @bind="paid" />
@@ -229,34 +305,37 @@ else
                 }
             }
 
-            <label class="check">
-                <input type="checkbox" @bind="hasContribution" />
-                Money goes in from my bank regularly
-            </label>
-            @if (hasContribution)
+            @if (!PolicyHasTerms)
             {
-                <label for="h-match">The bank entry contains</label>
-                <input id="h-match" type="text" autocorrect="off" placeholder="FWD" @bind="contributionMatch" />
-                <div class="two">
-                    <div>
-                        <label for="h-camt">Amount each time (optional)</label>
-                        <input id="h-camt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="300" @bind="contributionAmount" />
+                <label class="check">
+                    <input type="checkbox" @bind="hasContribution" />
+                    Money goes in from my bank regularly
+                </label>
+                @if (hasContribution)
+                {
+                    <label for="h-match">The bank entry contains</label>
+                    <input id="h-match" type="text" autocorrect="off" placeholder="FWD" @bind="contributionMatch" />
+                    <div class="two">
+                        <div>
+                            <label for="h-camt">Amount each time (optional)</label>
+                            <input id="h-camt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="300" @bind="contributionAmount" />
+                        </div>
+                        <div>
+                            <label for="h-cacc">From (optional)</label>
+                            <select id="h-cacc" @bind="contributionAccountId">
+                                <option value="">Any account</option>
+                                @foreach (var a in accounts)
+                                {
+                                    <option value="@a.Id">@a.Name</option>
+                                }
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label for="h-cacc">From (optional)</label>
-                        <select id="h-cacc" @bind="contributionAccountId">
-                            <option value="">Any account</option>
-                            @foreach (var a in accounts)
-                            {
-                                <option value="@a.Id">@a.Name</option>
-                            }
-                        </select>
-                    </div>
-                </div>
-                <p class="hint">
-                    Each matching payment is added to what you've put in@(IsBalance || IsPolicy ? "" : ", at cost until you update the units held").
-                    Payments before today are taken as already in the figures above. They show up once the bank entry is in the app, for example after a statement import.
-                </p>
+                    <p class="hint">
+                        Each matching payment is added to what you've put in@(IsBalance || IsPolicy ? "" : ", at cost until you update the units held").
+                        Payments before today are taken as already in the figures above. They show up once the bank entry is in the app, for example after a statement import.
+                    </p>
+                }
             }
 
             <label for="h-platform">Where it is held (optional)</label>
@@ -282,6 +361,8 @@ else
     private static readonly string[] Currencies = ["SGD", "USD", "HKD", "GBP", "EUR", "AUD", "JPY", "MYR"];
 
     private PortfolioSummary? p;
+    /// <summary>Every insurance plan with contract terms, added up.</summary>
+    private PoliciesTotal? ilps;
     private string? error;
 
     private bool editing;
@@ -314,6 +395,8 @@ else
     private bool IsBalance => assetClass is "Cpf" or "Cash";
     /// <summary>An ILP: what was paid in and what the insurer says it's worth.</summary>
     private bool IsPolicy => assetClass == "Policy";
+    /// <summary>An ILP set up on its policy screen, which owns its figures and bank text.</summary>
+    private bool PolicyHasTerms => IsPolicy && found is { HasPolicyTerms: true };
     private static bool IsPriced(string assetClass) => assetClass is not ("Cpf" or "Cash");
     private static bool IsBalanceClass(string assetClass) => assetClass is "Cpf" or "Cash" or "Policy";
     private static bool FetchesByDefault(string assetClass) => assetClass is "Etf" or "Stock" or "Crypto";
@@ -356,6 +439,15 @@ else
         catch (ApiException e)
         {
             error = e.Message;
+            return;
+        }
+        try
+        {
+            ilps = await Api.Policies();
+        }
+        catch (ApiException)
+        {
+            ilps = null; // the holdings still show; the plans card just doesn't
         }
     }
 
@@ -424,6 +516,12 @@ else
             body = new HoldingSave(assetClass == "Cpf" ? "CPF" : "CASH", name.Trim(), assetClass, Clean(platform),
                 1, balance!.Value, "SGD", balance.Value, 1, false, match, camt, cacc);
         }
+        else if (PolicyHasTerms)
+        {
+            // Only the name and platform are edited here; the rest follows the policy.
+            body = new HoldingSave(found!.Symbol, name.Trim(), assetClass, Clean(platform),
+                1, found.AverageCost, "SGD", found.LastPrice, 1, false, match, camt, cacc);
+        }
         else if (IsPolicy)
         {
             body = new HoldingSave("ILP", name.Trim(), assetClass, Clean(platform),
@@ -470,6 +568,8 @@ else
             if (balance is not >= 0) return "Enter the balance.";
             return null;
         }
+
+        if (PolicyHasTerms) return string.IsNullOrWhiteSpace(name) ? "Give it a name." : null;
 
         if (IsPolicy)
         {

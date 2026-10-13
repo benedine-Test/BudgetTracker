@@ -129,7 +129,8 @@ public static class BudgetEndpoints
         {
             var holdings = await db.Holdings.AsNoTracking().ToListAsync(ct);
             var baseCcy = (await budgets.GetSettingsAsync(ct)).BaseCurrency;
-            return Portfolio.Summarise(holdings, await ContributionsAsync(db, holdings, baseCcy, ct), clock.UtcNow);
+            var (policyFigures, surrender) = await PolicyEndpoints.FiguresAsync(db, clock.Today, ct);
+            return Portfolio.Summarise(holdings, await ContributionsAsync(db, holdings, baseCcy, ct), clock.UtcNow, policyFigures, surrender);
         });
 
         // Fetches prices for holdings set to AutoPrice and exchange rates for foreign ones.
@@ -170,7 +171,13 @@ public static class BudgetEndpoints
         });
 
         api.MapDelete("/holdings/{id:int}", async (int id, BudgetDbContext db, CancellationToken ct) =>
-            await db.Holdings.Where(h => h.Id == id).ExecuteDeleteAsync(ct) == 0 ? Results.NotFound() : Results.NoContent());
+        {
+            if (await db.Holdings.Where(h => h.Id == id).ExecuteDeleteAsync(ct) == 0) return Results.NotFound();
+            // An ILP's terms and statements go with it.
+            await db.PolicyTerms.Where(t => t.HoldingId == id).ExecuteDeleteAsync(ct);
+            await db.PolicyValuations.Where(v => v.HoldingId == id).ExecuteDeleteAsync(ct);
+            return Results.NoContent();
+        });
 
         // ---- Export ----
         api.MapGet("/export/transactions.csv", async (BudgetDbContext db, CancellationToken ct) =>

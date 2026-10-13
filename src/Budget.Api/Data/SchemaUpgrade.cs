@@ -151,32 +151,34 @@ public static class SchemaUpgrade
                 await db.Database.ExecuteSqlRawAsync(sqlServer
                     ? "ALTER TABLE [Settings] ADD [BirthDate] date NULL;"
                     : "ALTER TABLE \"Settings\" ADD COLUMN \"BirthDate\" TEXT NULL;", ct);
-                // ---- Shared bills (your share, who owes the rest, repayments) ----
-                if (!await ColumnExistsAsync(conn, "Transactions", "RepaysId", sqlServer, ct))
+            }
+
+            // ---- Shared bills (your share, who owes the rest, repayments) ----
+            if (!await ColumnExistsAsync(conn, "Transactions", "RepaysId", sqlServer, ct))
+            {
+                foreach (var (column, sqlServerType, sqliteType) in new[]
                 {
-                    foreach (var (column, sqlServerType, sqliteType) in new[]
-                    {
                     ("MyShare", "decimal(18,2) NULL", "TEXT NULL"),
                     ("SharedWith", "nvarchar(100) NULL", "TEXT NULL"),
                     ("RepaysId", "int NULL", "INTEGER NULL"),
                 })
-                    {
-                        if (await ColumnExistsAsync(conn, "Transactions", column, sqlServer, ct)) continue;
-                        await db.Database.ExecuteSqlRawAsync(sqlServer
-                            ? $"ALTER TABLE [Transactions] ADD [{column}] {sqlServerType};"
-                            : $"ALTER TABLE \"Transactions\" ADD COLUMN \"{column}\" {sqliteType};", ct);
-                    }
-                    await db.Database.ExecuteSqlRawAsync(sqlServer
-                        ? "CREATE INDEX [IX_Transactions_RepaysId] ON [Transactions] ([RepaysId]);"
-                        : "CREATE INDEX \"IX_Transactions_RepaysId\" ON \"Transactions\" (\"RepaysId\");", ct);
-                }
-
-                // ---- Automatic prices and regular contributions on holdings ----
-                if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
-                    && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))
                 {
-                    foreach (var (column, sqlServerType, sqliteType) in new[]
-                    {
+                    if (await ColumnExistsAsync(conn, "Transactions", column, sqlServer, ct)) continue;
+                    await db.Database.ExecuteSqlRawAsync(sqlServer
+                        ? $"ALTER TABLE [Transactions] ADD [{column}] {sqlServerType};"
+                        : $"ALTER TABLE \"Transactions\" ADD COLUMN \"{column}\" {sqliteType};", ct);
+                }
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_Transactions_RepaysId] ON [Transactions] ([RepaysId]);"
+                    : "CREATE INDEX \"IX_Transactions_RepaysId\" ON \"Transactions\" (\"RepaysId\");", ct);
+            }
+
+            // ---- Automatic prices and regular contributions on holdings ----
+            if (await TableExistsAsync(conn, "Holdings", sqlServer, ct)
+                && !await ColumnExistsAsync(conn, "Holdings", "AutoPrice", sqlServer, ct))
+            {
+                foreach (var (column, sqlServerType, sqliteType) in new[]
+                {
                     ("AutoPrice", "bit NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
                     ("PriceError", "nvarchar(300) NULL", "TEXT NULL"),
                     ("FiguresAsOfUtc", "datetime2 NULL", "TEXT NULL"),
@@ -184,22 +186,92 @@ public static class SchemaUpgrade
                     ("ContributionAmount", "decimal(18,2) NULL", "TEXT NULL"),
                     ("ContributionAccountId", "int NULL", "INTEGER NULL"),
                 })
-                    {
-                        if (await ColumnExistsAsync(conn, "Holdings", column, sqlServer, ct)) continue;
-                        await db.Database.ExecuteSqlRawAsync(sqlServer
-                            ? $"ALTER TABLE [Holdings] ADD [{column}] {sqlServerType};"
-                            : $"ALTER TABLE \"Holdings\" ADD COLUMN \"{column}\" {sqliteType};", ct);
-                    }
-
-                    // Shares, ETFs and crypto already carry a ticker, so they start fetching their price.
-                    // Existing figures are taken as up to date, so no past payment is counted twice.
+                {
+                    if (await ColumnExistsAsync(conn, "Holdings", column, sqlServer, ct)) continue;
                     await db.Database.ExecuteSqlRawAsync(sqlServer
-                        ? "UPDATE [Holdings] SET [AutoPrice] = 1 WHERE [AssetClass] IN (0, 1, 3);"
-                        : "UPDATE \"Holdings\" SET \"AutoPrice\" = 1 WHERE \"AssetClass\" IN (0, 1, 3);", ct);
-                    await db.Database.ExecuteSqlRawAsync(sqlServer
-                        ? "UPDATE [Holdings] SET [FiguresAsOfUtc] = SYSUTCDATETIME();"
-                        : "UPDATE \"Holdings\" SET \"FiguresAsOfUtc\" = strftime('%Y-%m-%d %H:%M:%f', 'now');", ct);
+                        ? $"ALTER TABLE [Holdings] ADD [{column}] {sqlServerType};"
+                        : $"ALTER TABLE \"Holdings\" ADD COLUMN \"{column}\" {sqliteType};", ct);
                 }
+
+                // Shares, ETFs and crypto already carry a ticker, so they start fetching their price.
+                // Existing figures are taken as up to date, so no past payment is counted twice.
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "UPDATE [Holdings] SET [AutoPrice] = 1 WHERE [AssetClass] IN (0, 1, 3);"
+                    : "UPDATE \"Holdings\" SET \"AutoPrice\" = 1 WHERE \"AssetClass\" IN (0, 1, 3);", ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "UPDATE [Holdings] SET [FiguresAsOfUtc] = SYSUTCDATETIME();"
+                    : "UPDATE \"Holdings\" SET \"FiguresAsOfUtc\" = strftime('%Y-%m-%d %H:%M:%f', 'now');", ct);
+            }
+
+            // ---- ILP contract terms and statement values ----
+            if (!await TableExistsAsync(conn, "PolicyTerms", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PolicyTerms] (
+                          [Id] int NOT NULL IDENTITY,
+                          [HoldingId] int NOT NULL,
+                          [CommencementDate] date NOT NULL,
+                          [MonthlyPremium] decimal(18,2) NOT NULL,
+                          [InitialPeriodMonths] int NOT NULL,
+                          [MinimumInvestmentYears] int NOT NULL,
+                          [PremiumTermYears] int NULL,
+                          [ScheduleJson] nvarchar(max) NOT NULL,
+                          CONSTRAINT [PK_PolicyTerms] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PolicyTerms" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PolicyTerms" PRIMARY KEY AUTOINCREMENT,
+                          "HoldingId" INTEGER NOT NULL,
+                          "CommencementDate" TEXT NOT NULL,
+                          "MonthlyPremium" TEXT NOT NULL,
+                          "InitialPeriodMonths" INTEGER NOT NULL,
+                          "MinimumInvestmentYears" INTEGER NOT NULL,
+                          "PremiumTermYears" INTEGER NULL,
+                          "ScheduleJson" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE UNIQUE INDEX [IX_PolicyTerms_HoldingId] ON [PolicyTerms] ([HoldingId]);"
+                    : "CREATE UNIQUE INDEX \"IX_PolicyTerms_HoldingId\" ON \"PolicyTerms\" (\"HoldingId\");", ct);
+            }
+
+            // Added with the second plan (FWD): a PolicyTerms table from before has no premium term.
+            if (!await ColumnExistsAsync(conn, "PolicyTerms", "PremiumTermYears", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [PolicyTerms] ADD [PremiumTermYears] int NULL;"
+                    : "ALTER TABLE \"PolicyTerms\" ADD COLUMN \"PremiumTermYears\" INTEGER NULL;", ct);
+            }
+
+            if (!await TableExistsAsync(conn, "PolicyValuations", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PolicyValuations] (
+                          [Id] int NOT NULL IDENTITY,
+                          [HoldingId] int NOT NULL,
+                          [AsOf] date NOT NULL,
+                          [InitialUnits] decimal(18,2) NOT NULL,
+                          [AccumulationUnits] decimal(18,2) NOT NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_PolicyValuations] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PolicyValuations" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PolicyValuations" PRIMARY KEY AUTOINCREMENT,
+                          "HoldingId" INTEGER NOT NULL,
+                          "AsOf" TEXT NOT NULL,
+                          "InitialUnits" TEXT NOT NULL,
+                          "AccumulationUnits" TEXT NOT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_PolicyValuations_HoldingId] ON [PolicyValuations] ([HoldingId]);"
+                    : "CREATE INDEX \"IX_PolicyValuations_HoldingId\" ON \"PolicyValuations\" (\"HoldingId\");", ct);
             }
         }
         finally

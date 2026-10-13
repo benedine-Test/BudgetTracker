@@ -62,7 +62,7 @@ public record HoldingValue(int Id, string Symbol, string Name, string AssetClass
     decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct, bool PriceIsStale,
     bool AutoPrice, string? PriceError, string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
     int ContributionCount, decimal ContributedBase, DateTimeOffset? LastContributionAtUtc, decimal NotInFiguresBase,
-    decimal SalaryCpfNotInBalanceBase);
+    decimal SalaryCpfNotInBalanceBase, bool HasPolicyTerms, decimal? SurrenderValueBase);
 
 public record PriceRefreshResult(int Updated, int Failed, int Skipped, string Message);
 
@@ -76,6 +76,53 @@ public record CategoriseResult(TransactionDto Transaction, string? LearnedPatter
 public record HoldingSave(string Symbol, string Name, string AssetClass, string? Platform,
     decimal Units, decimal AverageCost, string Currency, decimal? LastPrice, decimal? FxToBase,
     bool AutoPrice, string ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId);
+
+/// <summary>Until: "MinimumInvestmentPeriod" | "PremiumTerm" | null. Timing: "Monthly" | "PolicyYearEnd".
+/// Base: "TotalAccount" | "AccumulationAccount". Adjustment: "None" | "PremiumsPaidLessWithdrawals".</summary>
+public record YearRate(string Name, int FromYear, int? ToYear, decimal PercentPerYear, string? Until = null,
+    decimal? CapPerYear = null, string Timing = "Monthly", string Base = "TotalAccount", string Adjustment = "None");
+
+/// <summary>Kind: "Shortfall" | "Reduction".</summary>
+public record PremiumCharge(string Name, string Kind, decimal PercentPerYear, int? AfterMissedMonths = null,
+    int? FromYear = null, int? ToYear = null, string? Until = null);
+
+public record FundShare(string Name, string Currency, decimal Percent);
+
+public record PolicySchedule(List<decimal> StartUpBonusPercent, List<YearRate> InitialUnitsFees, List<YearRate> AccumulationUnitsFees,
+    List<YearRate> AccountValueBonuses, List<decimal> EarlyEncashmentPercent, decimal FundChargePercent,
+    decimal PartialWithdrawalChargePercent, List<FundShare> Funds, List<PremiumCharge>? PremiumCharges = null,
+    string? WithdrawalChargeUntil = null, int? WithdrawalsFromMonth = null, decimal? TopUpChargePercent = null);
+
+public record PolicyPlan(string Key, string Name, int InitialPeriodMonths, int MinimumInvestmentYears, int? PremiumTermYears,
+    PolicySchedule Schedule);
+
+public record PolicySetup(DateOnly CommencementDate, decimal MonthlyPremium, int InitialPeriodMonths, int MinimumInvestmentYears,
+    PolicySchedule? Schedule, string? BankText, int? PremiumTermYears);
+
+public record PolicyToday(DateOnly Date, int PolicyYear, decimal EarlyEncashmentPercent, int PremiumsDue, decimal PremiumsPaid,
+    DateOnly NextYearStarts, decimal NextEarlyEncashmentPercent);
+
+public record PolicyPosition(int ValuationId, DateOnly AsOf, int PolicyYear, decimal PremiumsPaid, decimal InitialUnits,
+    decimal AccumulationUnits, decimal AccountValue, decimal EarlyEncashmentPercent, decimal EarlyEncashmentCharge,
+    decimal SurrenderValue, decimal Gap);
+
+public record PolicyView(int HoldingId, string Name, bool Configured, DateOnly? CommencementDate, decimal MonthlyPremium,
+    int InitialPeriodMonths, int MinimumInvestmentYears, PolicySchedule Schedule, string? BankText, string? PlanName,
+    PolicyToday? Today, List<PolicyPosition> Statements, int BankPremiumsFound, List<DateOnly> MissedPremiums,
+    int? PremiumTermYears);
+
+public record PolicyLine(int HoldingId, string Name, decimal MonthlyPremium, decimal PremiumsPaid, int PolicyYear,
+    DateOnly? StatementDate, decimal? PremiumsPaidAtStatement, decimal? PolicyValue, decimal? SurrenderValue, decimal? Gap);
+
+public record PoliciesTotal(decimal MonthlyPremium, decimal PremiumsPaid, decimal PolicyValue, decimal SurrenderValue,
+    decimal Gap, int WithoutStatement, List<PolicyLine> Policies);
+
+public record PolicySaved(PolicyView Policy, int ReFiled, int ConfirmedElsewhere, string? Category);
+
+public record ProjectionYear(int Year, DateOnly EndsOn, decimal PremiumsPaid, decimal InitialUnits, decimal AccumulationUnits,
+    decimal AccountValue, decimal EarlyEncashmentPercent, decimal SurrenderValue);
+
+public record ProjectionView(decimal GrossReturnPercent, decimal NetReturnPercent, DateOnly? FromStatement, List<ProjectionYear> Years);
 
 /// <summary>A problem worth showing to the person using the app, in plain words.</summary>
 public class ApiException(string message) : Exception(message);
@@ -229,6 +276,34 @@ public class Api(HttpClient http)
         id is null ? Send(HttpMethod.Post, "api/holdings", h) : Send(HttpMethod.Put, $"api/holdings/{id}", h);
 
     public Task DeleteHolding(int id) => Send(HttpMethod.Delete, $"api/holdings/{id}");
+
+    // ---- Insurance plans (ILP) ----
+    public Task<List<PolicyPlan>> PolicyPlans() => Get<List<PolicyPlan>>("api/policy-plans");
+
+    public Task<PoliciesTotal> Policies() => Get<PoliciesTotal>("api/policies");
+
+    public Task<PolicyView> Policy(int id) => Get<PolicyView>($"api/holdings/{id}/policy");
+
+    public async Task<PolicySaved> SavePolicy(int id, PolicySetup setup)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/holdings/{id}/policy", setup);
+        return (await r.Content.ReadFromJsonAsync<PolicySaved>(Json))!;
+    }
+
+    public Task<PolicyView> AddStatement(int id, DateOnly asOf, decimal initialUnits, decimal accumulationUnits) =>
+        Post<PolicyView>($"api/holdings/{id}/policy/valuations", new { asOf, initialUnits, accumulationUnits });
+
+    public async Task<PolicyView> DeleteStatement(int id, int valuationId)
+    {
+        using var r = await Send(HttpMethod.Delete, $"api/holdings/{id}/policy/valuations/{valuationId}");
+        return (await r.Content.ReadFromJsonAsync<PolicyView>(Json))!;
+    }
+
+    /// <summary>One projection per gross return rate; fromLatest starts at the newest statement.</summary>
+    public Task<List<ProjectionView>> Projection(int id, IEnumerable<decimal> rates, bool fromLatest) =>
+        Get<List<ProjectionView>>($"api/holdings/{id}/policy/projection?" + string.Join('&',
+            rates.Select(r => "rate=" + r.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append(fromLatest ? "from=latest" : "from=start")));
 
     /// <summary>Fetches prices that are due (all of them when forced) and exchange rates.</summary>
     public Task<PriceRefreshResult> RefreshPrices(bool force) =>
