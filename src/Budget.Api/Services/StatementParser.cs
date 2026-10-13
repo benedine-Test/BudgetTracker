@@ -154,6 +154,7 @@ public static partial class StatementParser
         k is "dr/cr" or "cr/dr" or "debit/credit" or "credit/debit" or "d/c" or "c/d" or "type" or "transaction type";
     private static bool IsAmountHeader(string k) => k.Contains("amount") && !IsDebitHeader(k) && !IsCreditHeader(k);
     private static bool IsBalanceHeader(string k) => k.Contains("balance");
+    private static bool IsForeignHeader(string k) => k.Contains("foreign") || k.Contains("original") || k.Contains("fcy");
     private static bool IsDescriptionHeader(string k) =>
         !IsDateHeader(k) && !IsAmountHeader(k) &&
         (k.Contains("desc") || k.Contains("detail") || k.Contains("narrat") || k.Contains("particular") ||
@@ -201,12 +202,16 @@ public static partial class StatementParser
         var meaningful = description.Where(i => data.Any(r => i < r.Count && r[i].Trim().Length > 4)).ToList();
         if (meaningful.Count > 0) description = meaningful;
 
+        // Card statements can list the amount twice: as charged abroad and in your own currency
+        // (UOB: "Transaction Amount(Foreign)" / "Transaction Amount(Local)"). Use your own currency.
+        var amount = First(k => IsAmountHeader(k) && !IsForeignHeader(k)) ?? First(IsAmountHeader);
+
         var detected = new ColumnMap(
             date,
             description.Select(i => headers[i]).ToList(),
             First(IsDebitHeader),
             First(IsCreditHeader),
-            First(IsAmountHeader),
+            amount,
             direction,
             First(IsBalanceHeader));
 
