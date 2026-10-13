@@ -38,6 +38,10 @@ else
             </span>
             on @Fmt.Money(p.TotalCostBase) put in
         </p>
+        @if (p.Holdings.Any(h => h.SurrenderValueBase is not null))
+        {
+            <p class="sub">The gain counts insurance plans at what surrendering would pay out; the total shows their policy value.</p>
+        }
         <p class="sub"><a class="link" style="margin-left:0" href="assets">Total assets with bank accounts ›</a></p>
         @if (p.Holdings.Any(h => h.AutoPrice))
         {
@@ -165,6 +169,10 @@ else
                         @if (h.NotInFiguresBase > 0 && !IsBalanceClass(h.AssetClass))
                         {
                             <span class="muted small">@Fmt.Money(h.NotInFiguresBase) paid in since you last entered units, counted at cost</span>
+                        }
+                        @if (h.SurrenderValueBase is { } surrender)
+                        {
+                            <span class="muted small">@Fmt.Money(surrender) if surrendered · gain shown on this</span>
                         }
                     </span>
                     <span class="row-end">

@@ -192,14 +192,21 @@ public static class PolicyEndpoints
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Cost and value for every policy holding with terms, for the portfolio (see Portfolio.Summarise).</summary>
-    public static async Task<Dictionary<int, (decimal Cost, decimal Value)>> FiguresAsync(BudgetDbContext db, DateOnly today, CancellationToken ct)
+    /// <summary>
+    /// For the portfolio (see Portfolio.Summarise), every policy holding with terms: its cost and value, and,
+    /// once it has a statement, the surrender value on that statement.
+    /// </summary>
+    public static async Task<(Dictionary<int, (decimal Cost, decimal Value)> Figures, Dictionary<int, decimal> Surrender)> FiguresAsync(
+        BudgetDbContext db, DateOnly today, CancellationToken ct)
     {
         var terms = await db.PolicyTerms.AsNoTracking().ToListAsync(ct);
-        if (terms.Count == 0) return [];
+        if (terms.Count == 0) return ([], []);
         var valuations = (await db.PolicyValuations.AsNoTracking().ToListAsync(ct))
-            .GroupBy(v => v.HoldingId).ToDictionary(g => g.Key, g => g.MaxBy(v => v.AsOf));
-        return terms.ToDictionary(t => t.HoldingId, t => PolicyMath.Figures(t, valuations.GetValueOrDefault(t.HoldingId), today));
+            .GroupBy(v => v.HoldingId).ToDictionary(g => g.Key, g => g.MaxBy(v => v.AsOf)!);
+        var figures = terms.ToDictionary(t => t.HoldingId, t => PolicyMath.Figures(t, valuations.GetValueOrDefault(t.HoldingId), today));
+        var surrender = terms.Where(t => valuations.ContainsKey(t.HoldingId)).ToDictionary(t => t.HoldingId,
+            t => PolicyMath.Position(t, PolicySchedule.Read(t.ScheduleJson), valuations[t.HoldingId]).SurrenderValue);
+        return (figures, surrender);
     }
 
     private static async Task<PolicyView> ViewAsync(BudgetDbContext db, Clock clock, Holding h, CancellationToken ct)

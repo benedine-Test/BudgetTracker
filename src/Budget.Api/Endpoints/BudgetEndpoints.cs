@@ -129,8 +129,8 @@ public static class BudgetEndpoints
         {
             var holdings = await db.Holdings.AsNoTracking().ToListAsync(ct);
             var baseCcy = (await budgets.GetSettingsAsync(ct)).BaseCurrency;
-            return Portfolio.Summarise(holdings, await ContributionsAsync(db, holdings, baseCcy, ct), clock.UtcNow,
-                await PolicyEndpoints.FiguresAsync(db, clock.Today, ct));
+            var (policyFigures, surrender) = await PolicyEndpoints.FiguresAsync(db, clock.Today, ct);
+            return Portfolio.Summarise(holdings, await ContributionsAsync(db, holdings, baseCcy, ct), clock.UtcNow, policyFigures, surrender);
         });
 
         // Fetches prices for holdings set to AutoPrice and exchange rates for foreign ones.

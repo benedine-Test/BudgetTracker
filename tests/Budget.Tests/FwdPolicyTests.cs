@@ -266,6 +266,26 @@ public class FwdPolicyTests
     }
 
     [Fact]
+    public void Portfolio_measures_an_ILPs_gain_on_surrender_value_but_keeps_its_policy_value()
+    {
+        var ilp = new Holding { Id = 1, Name = "HSBC", AssetClass = AssetClass.Policy, Units = 1 };
+        var etf = new Holding { Id = 2, Name = "ETF", AssetClass = AssetClass.Etf, Units = 10, AverageCost = 100m, LastPrice = 110m,
+            LastPriceAtUtc = DateTime.UtcNow };
+        var summary = Portfolio.Summarise([ilp, etf], [], DateTime.UtcNow,
+            new Dictionary<int, (decimal, decimal)> { [1] = (16_000m, 26_618.63m) },
+            new Dictionary<int, decimal> { [1] = 532.37m });
+
+        var row = summary.Holdings.Single(h => h.Id == 1);
+        Assert.Equal(26_618.63m, row.MarketValueBase);           // still what the accounts hold
+        Assert.Equal(532.37m, row.SurrenderValueBase);
+        Assert.Equal(532.37m - 16_000m, row.UnrealisedPnlBase);  // what surrendering would leave you with
+        Assert.Equal(26_618.63m + 1_100m, summary.TotalValueBase);
+        Assert.Equal(532.37m - 16_000m + 100m, summary.UnrealisedPnlBase);
+        // An ILP with no statement yet, and any other holding, keep value − cost.
+        Assert.Equal(100m, summary.Holdings.Single(h => h.Id == 2).UnrealisedPnlBase);
+    }
+
+    [Fact]
     public void Combined_view_adds_up_both_policies_each_at_its_own_statement_date()
     {
         var today = new DateOnly(2026, 10, 12);

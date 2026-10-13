@@ -62,7 +62,7 @@ public record HoldingValue(int Id, string Symbol, string Name, string AssetClass
     decimal CostBase, decimal MarketValueBase, decimal UnrealisedPnlBase, decimal? UnrealisedPnlPct, bool PriceIsStale,
     bool AutoPrice, string? PriceError, string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
     int ContributionCount, decimal ContributedBase, DateTimeOffset? LastContributionAtUtc, decimal NotInFiguresBase,
-    decimal SalaryCpfNotInBalanceBase, bool HasPolicyTerms);
+    decimal SalaryCpfNotInBalanceBase, bool HasPolicyTerms, decimal? SurrenderValueBase);
 
 public record PriceRefreshResult(int Updated, int Failed, int Skipped, string Message);
 

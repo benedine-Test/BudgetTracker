@@ -9,7 +9,9 @@ public record HoldingValue(
     bool PriceIsStale, bool AutoPrice, string? PriceError,
     string? ContributionMatch, decimal? ContributionAmount, int? ContributionAccountId,
     int ContributionCount, decimal ContributedBase, DateTime? LastContributionAtUtc, decimal NotInFiguresBase,
-    decimal SalaryCpfNotInBalanceBase, bool HasPolicyTerms = false);
+    decimal SalaryCpfNotInBalanceBase, bool HasPolicyTerms = false,
+    // An ILP's surrender value from its latest statement: what it would pay out. Its gain is measured on this.
+    decimal? SurrenderValueBase = null);
 
 public record AllocationSlice(string AssetClass, decimal ValueBase, decimal Percent);
 
@@ -99,8 +101,10 @@ public static class Portfolio
     /// its premium schedule and statements (see <see cref="PolicyMath.Figures"/>). Bank contributions
     /// are still counted and shown for it, but don't change these figures.
     /// </param>
+    /// <param name="surrenderValues">An ILP's surrender value by holding id; its gain is measured on this, not its value.</param>
     public static PortfolioSummary Summarise(IEnumerable<Holding> holdings, IReadOnlyList<Contribution> contributions, DateTime nowUtc,
-        IReadOnlyDictionary<int, (decimal Cost, decimal Value)>? workedOut = null)
+        IReadOnlyDictionary<int, (decimal Cost, decimal Value)>? workedOut = null,
+        IReadOnlyDictionary<int, decimal>? surrenderValues = null)
     {
         var byHolding = contributions.ToLookup(c => c.HoldingId);
         var rows = holdings.Select(h =>
@@ -119,14 +123,17 @@ public static class Portfolio
             var value = Math.Round(h.Units * (h.LastPrice ?? h.AverageCost) * h.FxToBase + notInValue, 2);
             if (workedOut is not null && workedOut.TryGetValue(h.Id, out var known))
                 (cost, value, notInCost) = (known.Cost, known.Value, 0);
-            var pnl = value - cost;
+            // An ILP's gain is what surrendering would pay out less what went in, not its policy value:
+            // the surrender charge keeps most of the policy value in the early years.
+            decimal? surrender = surrenderValues is not null && surrenderValues.TryGetValue(h.Id, out var sv) ? sv : null;
+            var pnl = (surrender ?? value) - cost;
             decimal? pnlPct = cost == 0 ? null : Math.Round(pnl / cost * 100, 2);
             var stale = h.LastPriceAtUtc is null || nowUtc - h.LastPriceAtUtc > StaleAfter;
             return new HoldingValue(h.Id, h.Symbol, h.Name, h.AssetClass.ToString(), h.Platform, h.Units, h.AverageCost, h.Currency, h.FxToBase,
                 h.LastPrice, h.LastPriceAtUtc, cost, value, pnl, pnlPct, stale, h.AutoPrice, h.PriceError,
                 h.ContributionMatch, h.ContributionAmount, h.ContributionAccountId,
                 paid.Count, paid.Sum(c => c.Amount), paid.Count == 0 ? null : paid.Max(c => c.OccurredAtUtc), notInCost, salaryCpf,
-                workedOut?.ContainsKey(h.Id) == true);
+                workedOut?.ContainsKey(h.Id) == true, surrender);
         }).OrderByDescending(r => r.MarketValueBase).ToList();
 
         var totalCost = rows.Sum(r => r.CostBase);
@@ -137,8 +144,9 @@ public static class Portfolio
             .OrderByDescending(a => a.ValueBase)
             .ToList();
 
-        return new PortfolioSummary(totalCost, totalValue, totalValue - totalCost,
-            totalCost == 0 ? null : Math.Round((totalValue - totalCost) / totalCost * 100, 2),
+        var totalPnl = rows.Sum(r => r.UnrealisedPnlBase);
+        return new PortfolioSummary(totalCost, totalValue, totalPnl,
+            totalCost == 0 ? null : Math.Round(totalPnl / totalCost * 100, 2),
             allocation, rows);
     }
 }
