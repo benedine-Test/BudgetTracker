@@ -118,6 +118,51 @@ public class ExcelStatementTests
     }
 
     [Fact]
+    public void Uses_the_local_currency_amount_when_a_card_lists_foreign_amounts_too()
+    {
+        // Laid out like UOB's credit card "CC_TXN_History" download.
+        var file = Xlsx([
+            ["United Overseas Bank Limited."],
+            ["Account Type:", "UOB ONE CARD"],
+            ["Statement Balance:", "8575.17", "SGD"],
+            [],
+            ["Transaction Date", "Posting Date", "Description", "Foreign Currency Type", "Transaction Amount(Foreign)", "Local Currency Type", "Transaction Amount(Local)"],
+            ["13 Oct 2026", null, "Grab* GPC-49fe7e82250c47eSINGAPORE   SG ", null, null, "SGD", 325.0],   // pending
+            [null, null, "Previous Balance", null, null, "SGD", 7522.09],
+            ["12 Oct 2026", "12 Oct 2026", "UOB ONE CASH REBATE BILL REDEMPTION", null, null, "SGD", -200.0],
+            ["14 Sep 2026", "15 Sep 2026", "LEVI STRAUSS (HONG KON NT HK\nRef No: 74896026257688700091712", "HKD", 1328.0, "SGD", 222.12],
+            ["06 Oct 2026", "09 Oct 2026", "MCDONALD'S (BRP) SINGAPORE SG", null, null, "SGD", 33.4],
+        ]);
+
+        var parsed = ExcelStatementReader.Read(file, null, positiveIsSpend: true);
+
+        Assert.Null(parsed.Problem);
+        Assert.Equal("Transaction Amount(Local)", parsed.Columns.Amount);
+        Assert.Equal(3, parsed.Rows.Count);
+        Assert.Equal((200m, true), (parsed.Rows[0].Amount, parsed.Rows[0].IsCredit));
+        Assert.Equal((222.12m, false), (parsed.Rows[1].Amount, parsed.Rows[1].IsCredit));   // SGD, not HKD 1328
+        Assert.Equal(33.4m, parsed.Rows[2].Amount);
+        Assert.Equal("LEVI STRAUSS (HONG KON NT HK", parsed.Rows[1].Description);   // no "Ref No: …"
+        Assert.Contains("1 pending charge", parsed.Warning);
+    }
+
+    [Fact]
+    public void Reads_every_line_when_nothing_has_a_posting_date()
+    {
+        var file = Xlsx([
+            ["Transaction Date", "Posting Date", "Description", "Transaction Amount(Local)"],
+            ["13 Oct 2026", null, "GRAB", 325.0],
+            ["14 Oct 2026", null, "BUS/MRT", 2.3],
+        ]);
+
+        var parsed = ExcelStatementReader.Read(file, null, positiveIsSpend: true);
+
+        // With no posted line at all, there's nothing to tell pending from posted: read them all.
+        Assert.Null(parsed.Problem);
+        Assert.Equal(2, parsed.Rows.Count);
+    }
+
+    [Fact]
     public void Gives_back_the_headings_when_it_cannot_tell_the_amount_column()
     {
         var file = Xlsx([
