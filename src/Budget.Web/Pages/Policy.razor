@@ -160,12 +160,16 @@ else
                             <tr>
                                 <th rowspan="2">Year</th>
                                 <th rowspan="2">Paid</th>
-                                <th colspan="2">At @Fmt.Percent(proj[0].GrossReturnPercent)</th>
-                                <th colspan="2">At @Fmt.Percent(proj[1].GrossReturnPercent)</th>
+                                <th colspan="2" class="grp">At @Fmt.Percent(proj[0].GrossReturnPercent)</th>
+                                <th colspan="2" class="grp">At @Fmt.Percent(proj[1].GrossReturnPercent)</th>
                             </tr>
-                            <tr><th>Value</th><th>Surrender</th><th>Value</th><th>Surrender</th></tr>
+                            <tr><th class="grp">Value</th><th>Surrender</th><th class="grp">Value</th><th>Surrender</th></tr>
                         </thead>
                         <tbody>
+                            @{
+                                var evenA = proj[0].Years.FirstOrDefault(y => y.SurrenderValue >= y.PremiumsPaid)?.Year;
+                                var evenB = proj[1].Years.FirstOrDefault(y => y.SurrenderValue >= y.PremiumsPaid)?.Year;
+                            }
                             @for (var i = 0; i < proj[0].Years.Count; i++)
                             {
                                 var a = proj[0].Years[i];
@@ -173,16 +177,16 @@ else
                                 <tr>
                                     <td>@a.Year</td>
                                     <td>@K(a.PremiumsPaid)</td>
-                                    <td>@K(a.AccountValue)</td>
-                                    <td class="@(a.SurrenderValue >= a.PremiumsPaid ? "pos" : "")">@K(a.SurrenderValue)</td>
-                                    <td>@K(b.AccountValue)</td>
-                                    <td class="@(b.SurrenderValue >= b.PremiumsPaid ? "pos" : "")">@K(b.SurrenderValue)</td>
+                                    <td class="grp">@K(a.AccountValue)</td>
+                                    <td class="@Cell(a, evenA)">@K(a.SurrenderValue)</td>
+                                    <td class="grp">@K(b.AccountValue)</td>
+                                    <td class="@Cell(b, evenB)">@K(b.SurrenderValue)</td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
-                <p class="hint">Thousands of S$. Green: surrender value at or above the premiums paid.</p>
+                <p class="hint">Thousands of S$. Green: surrender value at or above the premiums paid; the marked cell is the first year it gets there.</p>
             }
         </section>
     }
@@ -613,5 +617,8 @@ else
     private static string Day(DateOnly d) => d.ToString("d MMM yyyy", Inv);
 
     /// <summary>Thousands, one decimal: 272,609 → 272.6.</summary>
+    private static string Cell(ProjectionYear y, int? breakEven) =>
+        y.SurrenderValue < y.PremiumsPaid ? "" : y.Year == breakEven ? "pos even" : "pos";
+
     private static string K(decimal value) => (value / 1000m).ToString("#,0.0", Inv);
 }
