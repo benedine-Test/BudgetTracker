@@ -78,6 +78,21 @@ public class FwdPolicyTests
     }
 
     [Fact]
+    public void Agrees_with_FWDs_statement_of_29_September_2026()
+    {
+        // Statement of Account: initial units S$6,798.55, accumulation S$0, policy value S$6,798.55,
+        // indicative surrender value S$0.00, total premiums received S$4,500.00.
+        var p = PolicyMath.Position(Terms(), Fwd, Statement(2026, 9, 29, 6_798.55m, 0m));
+
+        Assert.Equal(6_798.55m, p.AccountValue);
+        Assert.Equal(0m, p.SurrenderValue);
+        Assert.Equal(4_500m, p.PremiumsPaid);
+        Assert.Equal(4_500m, p.Gap);
+        // That month's booster: S$45 on each S$150 half of the premium, i.e. 30%.
+        Assert.Equal(45m / 150m * 100m, Fwd.StartUpBonusIn(2));
+    }
+
+    [Fact]
     public void Accumulation_charge_is_capped_at_756_a_year_above_50_400()
     {
         var schedule = Bare() with { AccumulationUnitsFees = Fwd.AccumulationUnitsFees };

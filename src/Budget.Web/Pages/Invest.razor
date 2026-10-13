@@ -75,14 +75,23 @@ else
 
     @if (ilps is { Policies.Count: > 0 })
     {
-        <section class="card">
-            <h2>Insurance plans</h2>
+        <section class="card hero">
+            <p class="label">Insurance plans, total policy value</p>
+            @if (ilps.WithoutStatement < ilps.Policies.Count)
+            {
+                <p class="big">@Fmt.Money(ilps.PolicyValue)</p>
+                <p class="sub">@Fmt.Money(ilps.SurrenderValue) if surrendered · @Fmt.Money(ilps.PremiumsPaid) paid in</p>
+            }
+            else
+            {
+                <p class="big">@Fmt.Money(ilps.PremiumsPaid)</p>
+                <p class="sub">paid in so far. Enter each plan's statement to see what it's worth.</p>
+            }
             <dl class="facts">
                 <dt>Monthly premiums</dt><dd class="num">@Fmt.Money(ilps.MonthlyPremium)</dd>
                 <dt>Premiums paid so far</dt><dd class="num">@Fmt.Money(ilps.PremiumsPaid)</dd>
                 @if (ilps.WithoutStatement < ilps.Policies.Count)
                 {
-                    <dt>Policy value</dt><dd class="num">@Fmt.Money(ilps.PolicyValue)</dd>
                     <dt>Surrender value</dt><dd class="num">@Fmt.Money(ilps.SurrenderValue)</dd>
                     <dt>@(ilps.Gap > 0 ? "Short of premiums paid by" : "Ahead of premiums paid by")</dt>
                     <dd class="num @(ilps.Gap > 0 ? "neg" : "pos")">@Fmt.Money(Math.Abs(ilps.Gap))</dd>
