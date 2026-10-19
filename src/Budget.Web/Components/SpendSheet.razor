@@ -1,0 +1,128 @@
+@inject Api Api
+@inject Toast Toast
+
+<Sheet Title="Add spending" OnClose="OnClose">
+    <form @onsubmit="Save" @onsubmit:preventDefault>
+        <label for="add-amount">Amount (S$)</label>
+        <input id="add-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="amount" />
+
+        <label for="add-merchant">Shop or payee</label>
+        <input id="add-merchant" type="text" autocapitalize="words" @bind="merchant" />
+
+        <label for="add-cat">Category</label>
+        <select id="add-cat" @bind="categoryId">
+            <option value="0">Work it out from the shop name</option>
+            @foreach (var group in CategoryGroups)
+            {
+                <optgroup label="@group.Key">
+                    @foreach (var c in group)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </optgroup>
+            }
+        </select>
+
+        @if (accounts.Count > 0)
+        {
+            <label for="add-acc">Paid from</label>
+            <select id="add-acc" @bind="accountId">
+                <option value="0">Not sure / skip</option>
+                @foreach (var a in accounts)
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+        }
+
+        <label for="add-when">When</label>
+        <input id="add-when" type="datetime-local" @bind="when" @bind:format="yyyy-MM-ddTHH:mm" />
+
+        <label for="add-notes">Note (optional)</label>
+        <input id="add-notes" type="text" @bind="notes" />
+
+        @if (error is not null)
+        {
+            <p class="field-error" role="alert">@error</p>
+        }
+        <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+    </form>
+</Sheet>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    /// <summary>The account to start with, e.g. the one Spending is filtered to.</summary>
+    [Parameter] public int? AccountId { get; set; }
+
+    private List<CategoryDto> categories = [];
+    private List<AccountDto> accounts = [];
+    private decimal? amount;
+    private string merchant = "";
+    private int categoryId;
+    private int accountId;
+    private DateTime when;
+    private string? notes;
+    private string? error;
+    private bool busy;
+
+    private IEnumerable<IGrouping<string, CategoryDto>> CategoryGroups => categories
+        .Where(c => !c.IsArchived && c.Bucket is "Needs" or "Wants" or "Savings" or "Transfer")
+        .GroupBy(c => c.Bucket);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var now = DateTime.Now;
+        when = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0);
+        accountId = AccountId ?? 0;
+
+        try
+        {
+            categories = await Api.Categories();
+        }
+        catch (ApiException) { /* the category is then worked out from the shop name */ }
+
+        try
+        {
+            accounts = (await Api.Accounts()).Accounts;
+        }
+        catch (ApiException) { /* the sheet still works without accounts */ }
+    }
+
+    private async Task Save()
+    {
+        if (busy) return;
+        if (amount is not > 0)
+        {
+            error = "Enter an amount above zero.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(merchant))
+        {
+            error = "Enter the shop or payee.";
+            return;
+        }
+
+        busy = true;
+        error = null;
+        try
+        {
+            // Send the phone's own offset so the time is right even when travelling.
+            var at = new DateTimeOffset(DateTime.SpecifyKind(when, DateTimeKind.Unspecified),
+                TimeZoneInfo.Local.GetUtcOffset(when));
+            await Api.AddSpend(amount.Value, merchant.Trim(), categoryId == 0 ? null : categoryId,
+                at.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(), accountId == 0 ? null : accountId);
+            Toast.Show("Added.");
+            await OnSaved.InvokeAsync();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

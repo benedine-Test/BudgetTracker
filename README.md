@@ -21,7 +21,7 @@ Run the tests with `dotnet test` from the repo root.
 
 A Blazor WebAssembly app served by the same site as the API, so **publishing `Budget.Api` deploys both**.
 
-- **Budget** — what's left from this pay, the three buckets with progress and a daily allowance, where the money went, and earlier pay periods.
+- **Budget** — what's left from this pay, the three buckets with progress and a daily allowance, where the money went, and earlier pay periods, plus **Add by hand** buttons for spending and income.
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
 - **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance, and a salary recorded from base pay adds its CPF (yours and your employer's) to the CPF balance until you type in a new figure; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
@@ -31,6 +31,14 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
 
 **On the iPhone:** open the site in Safari → Share → **Add to Home Screen**. On first open it asks once for the secret key and remembers it on that phone only.
+
+**Adding from the iPhone home screen.** iOS doesn't let a web app put its own widget on the home screen, so use a Shortcut, the same way Apple Pay taps come in. It saves without opening the app:
+1. Shortcuts → new shortcut → **Ask for Input** (Number, "Amount") → **Ask for Input** (Text, "Shop or payee").
+2. **Get Contents of URL**: `https://<your site>/api/transactions`, method **POST**, header `X-Api-Key: <your key>`, JSON body `amount` = the first input, `merchant` = the second. The category is worked out from the shop name, as with Apple Pay.
+3. For income, make a second one posting to `/api/income` with `amount`, `kind` = `other` (or `refund`; `salary` sets the budget) and an optional `note`.
+4. Add each to the home screen (Share → Add to Home Screen) or put them in a Shortcuts widget.
+
+On Android, long-press the app icon for **Add spending** / **Add income**; they open the app at `/?add=spend` and `/?add=income`.
 
 There is no offline mode: the app needs a connection, and on the free Azure plan the first load after a quiet spell can take about 20 seconds.
 

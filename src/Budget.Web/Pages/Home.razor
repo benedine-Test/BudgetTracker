@@ -1,5 +1,6 @@
 @page "/"
 @inject Api Api
+@inject NavigationManager Nav
 
 <PageTitle>Budget</PageTitle>
 
@@ -42,7 +43,7 @@ else
         <section class="card notice">
             <h2>No salary recorded for this period</h2>
             <p>Record your take-home pay and it is split into needs, wants and savings for you.</p>
-            <button type="button" class="btn primary" @onclick="() => showIncome = true">Record salary</button>
+            <button type="button" class="btn primary" @onclick="RecordSalary">Record salary</button>
         </section>
     }
     else
@@ -53,6 +54,14 @@ else
             <p class="sub">@Fmt.Money(s.TotalSpent) used of @Fmt.Money(s.TakeHomeIncome)</p>
         </section>
     }
+
+    <section class="card quick" aria-label="Add by hand">
+        <h2>Add by hand</h2>
+        <div class="two">
+            <button type="button" class="btn" @onclick="OpenSpend">− Spending</button>
+            <button type="button" class="btn" @onclick="OpenIncome">+ Income</button>
+        </div>
+    </section>
 
     @if (s.UncategorisedCount > 0)
     {
@@ -133,7 +142,12 @@ else
 
 @if (showIncome)
 {
-    <IncomeSheet OnClose="() => showIncome = false" OnSaved="IncomeSaved" />
+    <IncomeSheet Kind="@incomeKind" OnClose="() => showIncome = false" OnSaved="IncomeSaved" />
+}
+
+@if (showSpend)
+{
+    <SpendSheet OnClose="() => showSpend = false" OnSaved="SpendSaved" />
 }
 
 @code {
@@ -142,12 +156,24 @@ else
     private DateOnly? date;
     private string? error;
     private bool showIncome;
+    private string incomeKind = "salary";
+    private bool showSpend;
+
+    /// <summary>"spend" or "income" opens that form straight away, for home-screen shortcuts.</summary>
+    [SupplyParameterFromQuery(Name = "add")] public string? Add { get; set; }
 
     private bool IsCurrent => s is not null && s.PeriodStart <= Fmt.Today && Fmt.Today < s.PeriodEndExclusive;
     private bool IsFuture => s is not null && s.PeriodStart > Fmt.Today;
     private List<BudgetSummary> Past => history.Where(h => s is null || h.PeriodStart != s.PeriodStart).ToList();
 
-    protected override Task OnInitializedAsync() => Load();
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        if (Add is "spend") OpenSpend();
+        else if (Add is "income") OpenIncome();
+        // Drop the link's ?add= so a reload doesn't open the form again.
+        if (Add is not null) Nav.NavigateTo(Nav.GetUriWithQueryParameter("add", (string?)null), replace: true);
+    }
 
     private async Task Load()
     {
@@ -173,9 +199,35 @@ else
     private Task Prev() => s is null ? Task.CompletedTask : Go(s.PeriodStart.AddDays(-1));
     private Task Next() => s is null ? Task.CompletedTask : Go(s.PeriodEndExclusive);
 
+    private void RecordSalary()
+    {
+        incomeKind = "salary";
+        showIncome = true;
+    }
+
+    private void OpenSpend()
+    {
+        showIncome = false;
+        showSpend = true;
+    }
+
+    // Salary is the usual first entry of a period; once it's in, extra money is more likely other income.
+    private void OpenIncome()
+    {
+        incomeKind = s is { SalaryRecorded: true } ? "other" : "salary";
+        showSpend = false;
+        showIncome = true;
+    }
+
     private async Task IncomeSaved()
     {
         showIncome = false;
+        await Load();
+    }
+
+    private async Task SpendSaved()
+    {
+        showSpend = false;
         await Load();
     }
 
