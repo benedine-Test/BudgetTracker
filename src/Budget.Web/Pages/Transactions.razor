@@ -177,53 +177,7 @@ else
 
 @if (adding)
 {
-    <Sheet Title="Add spending" OnClose="CloseSheets">
-        <form @onsubmit="SaveNew" @onsubmit:preventDefault>
-            <label for="add-amount">Amount (S$)</label>
-            <input id="add-amount" type="number" inputmode="decimal" step="0.01" min="0" @bind="newAmount" />
-
-            <label for="add-merchant">Shop or payee</label>
-            <input id="add-merchant" type="text" autocapitalize="words" @bind="newMerchant" />
-
-            <label for="add-cat">Category</label>
-            <select id="add-cat" @bind="newCategoryId">
-                <option value="0">Work it out from the shop name</option>
-                @foreach (var group in CategoryGroups)
-                {
-                    <optgroup label="@group.Key">
-                        @foreach (var c in group)
-                        {
-                            <option value="@c.Id">@c.Name</option>
-                        }
-                    </optgroup>
-                }
-            </select>
-
-            @if (accounts.Count > 0)
-            {
-                <label for="add-acc">Paid from</label>
-                <select id="add-acc" @bind="newAccountId">
-                    <option value="0">Not sure / skip</option>
-                    @foreach (var a in accounts)
-                    {
-                        <option value="@a.Id">@a.Name</option>
-                    }
-                </select>
-            }
-
-            <label for="add-when">When</label>
-            <input id="add-when" type="datetime-local" @bind="newWhen" @bind:format="yyyy-MM-ddTHH:mm" />
-
-            <label for="add-notes">Note (optional)</label>
-            <input id="add-notes" type="text" @bind="newNotes" />
-
-            @if (formError is not null)
-            {
-                <p class="field-error" role="alert">@formError</p>
-            }
-            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
-        </form>
-    </Sheet>
+    <SpendSheet AccountId="@(AccountFilter is > 0 ? AccountFilter : null)" OnClose="CloseSheets" OnSaved="SpendSaved" />
 }
 
 @code {
@@ -243,7 +197,6 @@ else
     private List<CategoryDto> categories = [];
     private List<AccountDto> accounts = [];
     private bool accountsLoaded;
-    private int newAccountId;
     private string? error;
     private string search = "";
     private CancellationTokenSource? searchDelay;
@@ -258,12 +211,6 @@ else
     private bool busy;
 
     private bool adding;
-    private decimal? newAmount;
-    private string newMerchant = "";
-    private int newCategoryId;
-    private DateTime newWhen;
-    private string? newNotes;
-    private string? formError;
 
     private string Current => Filters.Any(f => f.Value == Filter) ? Filter! : "all";
     private int? AccountFilter => AccountParam == "none" ? 0 : int.TryParse(AccountParam, out var id) ? id : null;
@@ -396,18 +343,7 @@ else
         editError = null;
     }
 
-    private void OpenAdd()
-    {
-        adding = true;
-        newAmount = null;
-        newMerchant = "";
-        newCategoryId = 0;
-        newAccountId = AccountFilter is > 0 ? AccountFilter.Value : 0;
-        newNotes = null;
-        formError = null;
-        var now = DateTime.Now;
-        newWhen = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0);
-    }
+    private void OpenAdd() => adding = true;
 
     private void CloseSheets()
     {
@@ -471,41 +407,9 @@ else
         }
     }
 
-    private async Task SaveNew()
+    private async Task SpendSaved()
     {
-        if (busy) return;
-        if (newAmount is not > 0)
-        {
-            formError = "Enter an amount above zero.";
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(newMerchant))
-        {
-            formError = "Enter the shop or payee.";
-            return;
-        }
-
-        busy = true;
-        formError = null;
-        try
-        {
-            // Send the phone's own offset so the time is right even when travelling.
-            var when = new DateTimeOffset(DateTime.SpecifyKind(newWhen, DateTimeKind.Unspecified),
-                TimeZoneInfo.Local.GetUtcOffset(newWhen));
-            await Api.AddSpend(newAmount.Value, newMerchant.Trim(), newCategoryId == 0 ? null : newCategoryId,
-                when.ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture),
-                string.IsNullOrWhiteSpace(newNotes) ? null : newNotes.Trim(), newAccountId == 0 ? null : newAccountId);
-            Toast.Show("Added.");
-            adding = false;
-            await Load();
-        }
-        catch (ApiException e)
-        {
-            formError = e.Message;
-        }
-        finally
-        {
-            busy = false;
-        }
+        adding = false;
+        await Load();
     }
 }
