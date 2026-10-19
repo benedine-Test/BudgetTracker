@@ -144,6 +144,14 @@ public static class SchemaUpgrade
                     : "ALTER TABLE \"Transactions\" ADD COLUMN \"CpfContribution\" TEXT NULL;", ct);
             }
 
+            // ---- Credit card statement day ----
+            if (!await ColumnExistsAsync(conn, "Accounts", "StatementDay", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Accounts] ADD [StatementDay] int NULL;"
+                    : "ALTER TABLE \"Accounts\" ADD COLUMN \"StatementDay\" INTEGER NULL;", ct);
+            }
+
             // ---- Date of birth on the Profile page ----
             if (await TableExistsAsync(conn, "Settings", sqlServer, ct)
                 && !await ColumnExistsAsync(conn, "Settings", "BirthDate", sqlServer, ct))

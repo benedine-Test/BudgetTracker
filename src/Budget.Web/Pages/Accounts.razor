@@ -100,6 +100,13 @@ else
             <input id="acc-cards" type="text" placeholder="e.g. DBS Visa Debit, PayLah" @bind="formCards" />
             <p class="hint">As Apple Pay or the bank alert names the card. Taps on these cards are filed here by themselves. Separate with commas.</p>
 
+            @if (formKind == "CreditCard")
+            {
+                <label for="acc-stmt">Statement day (optional)</label>
+                <input id="acc-stmt" type="number" inputmode="numeric" min="1" max="31" placeholder="e.g. 12" @bind="formStatementDay" />
+                <p class="hint">The day of the month your statement closes. Home then shows what's on this statement so far.</p>
+            }
+
             @if (formError is not null)
             {
                 <p class="field-error" role="alert">@formError</p>
@@ -171,6 +178,12 @@ else
             </select>
             <label for="ed-cards">Card names</label>
             <input id="ed-cards" type="text" placeholder="e.g. DBS Visa Debit, PayLah" @bind="formCards" />
+            @if (formKind == "CreditCard")
+            {
+                <label for="ed-stmt">Statement day</label>
+                <input id="ed-stmt" type="number" inputmode="numeric" min="1" max="31" placeholder="e.g. 12" @bind="formStatementDay" />
+                <p class="hint">The day of the month the statement closes. Leave empty to stop tracking it. Days 29–31 use the last day of shorter months.</p>
+            }
             @if (formError is not null)
             {
                 <p class="field-error" role="alert">@formError</p>
@@ -349,6 +362,7 @@ else
     private string formKind = "Bank";
     private decimal? formBalance;
     private string? formCards;
+    private int? formStatementDay;
     private string? formError;
     private decimal? fixBalance;
 
@@ -416,6 +430,7 @@ else
         formKind = "Bank";
         formBalance = null;
         formCards = null;
+        formStatementDay = null;
         formError = null;
     }
 
@@ -429,6 +444,7 @@ else
         formName = a.Name;
         formKind = a.Kind;
         formCards = a.CardNames;
+        formStatementDay = a.StatementDay;
         formError = null;
         fixBalance = a.Kind == "CreditCard" ? -a.Balance : a.Balance;
         try { imports = await Api.Imports(a.Id); }
@@ -463,10 +479,12 @@ else
         if (busy) return;
         if (string.IsNullOrWhiteSpace(formName)) { formError = "Give the account a name."; return; }
         if (formBalance is null) { formError = "Enter the balance (0 is fine)."; return; }
+        if (!StatementDayOk()) return;
 
         await Run(async () =>
         {
-            await Api.AddAccount(formName.Trim(), formKind, SignedForKind(formBalance.Value), formCards);
+            await Api.AddAccount(formName.Trim(), formKind, SignedForKind(formBalance.Value), formCards,
+                formKind == "CreditCard" ? formStatementDay : null);
             Toast.Show($"{formName.Trim()} added.");
             adding = false;
             await Load();
@@ -490,13 +508,22 @@ else
     {
         if (selected is null || busy) return;
         if (string.IsNullOrWhiteSpace(formName)) { formError = "Give the account a name."; return; }
+        if (!StatementDayOk()) return;
         await Run(async () =>
         {
-            await Api.UpdateAccount(selected.Id, formName.Trim(), formKind, formCards ?? "", null);
+            await Api.UpdateAccount(selected.Id, formName.Trim(), formKind, formCards ?? "", null,
+                formKind == "CreditCard" ? formStatementDay ?? 0 : 0);
             Toast.Show("Saved.");
             selected = null;
             await Load();
         });
+    }
+
+    private bool StatementDayOk()
+    {
+        if (formKind != "CreditCard" || formStatementDay is null or (>= 1 and <= 31)) return true;
+        formError = "Statement day must be between 1 and 31.";
+        return false;
     }
 
     private async Task Archive()

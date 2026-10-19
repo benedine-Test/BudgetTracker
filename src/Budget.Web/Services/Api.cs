@@ -29,7 +29,12 @@ public record OwedDto(TransactionDto Bill, decimal Owed, decimal Repaid);
 public record OwedList(decimal Total, List<OwedDto> Bills);
 
 public record AccountDto(int Id, string Name, string Kind, string Currency, decimal Balance,
-    decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived, DateTimeOffset? LastImportAt);
+    decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived, DateTimeOffset? LastImportAt,
+    int? StatementDay = null);
+
+public record CardStatementDto(int AccountId, string Name, int StatementDay,
+    DateOnly CycleStart, DateOnly ClosesOn, int DaysToClose, decimal ChargedSoFar, int Count,
+    DateOnly LastCycleStart, DateOnly LastClosedOn, decimal LastCharged);
 
 public record AccountsSummary(decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
     int UnassignedSinceOldest, List<AccountDto> Accounts, decimal OwedToYou = 0);
@@ -227,11 +232,14 @@ public class Api(HttpClient http)
     public Task<AccountsSummary> Accounts(bool archived = false) =>
         Get<AccountsSummary>("api/accounts" + (archived ? "?archived=true" : ""));
 
-    public Task AddAccount(string name, string kind, decimal balance, string? cardNames) =>
-        Send(HttpMethod.Post, "api/accounts", new { name, kind, balance, cardNames });
+    public Task AddAccount(string name, string kind, decimal balance, string? cardNames, int? statementDay = null) =>
+        Send(HttpMethod.Post, "api/accounts", new { name, kind, balance, cardNames, statementDay });
 
-    public Task UpdateAccount(int id, string? name, string? kind, string? cardNames, bool? isArchived) =>
-        Send(HttpMethod.Put, $"api/accounts/{id}", new { name, kind, cardNames, isArchived });
+    /// <param name="statementDay">Null leaves it; 0 stops tracking.</param>
+    public Task UpdateAccount(int id, string? name, string? kind, string? cardNames, bool? isArchived, int? statementDay = null) =>
+        Send(HttpMethod.Put, $"api/accounts/{id}", new { name, kind, cardNames, isArchived, statementDay });
+
+    public Task<List<CardStatementDto>> CardStatements() => Get<List<CardStatementDto>>("api/accounts/statements");
 
     /// <summary>"The bank shows this now" — the balance counts on from here.</summary>
     public Task SetBalance(int id, decimal balance) =>

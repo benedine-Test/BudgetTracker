@@ -63,6 +63,29 @@ else
         </div>
     </section>
 
+    @if (IsCurrent && statements.Count > 0)
+    {
+        <section class="card">
+            <h2>Card statements</h2>
+            <div class="rows">
+                @foreach (var c in statements)
+                {
+                    <a class="row" href="@StatementLink(c)">
+                        <span class="row-main">
+                            <span>@c.Name</span>
+                            <span class="muted">@CloseLine(c)</span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num">@Fmt.Money(c.ChargedSoFar)</span>
+                            <span class="muted small">last @Fmt.Money(c.LastCharged)</span>
+                        </span>
+                    </a>
+                }
+            </div>
+            <p class="hint">Spending on each card this statement cycle, less refunds. Taps not filed under a card aren't included.</p>
+        </section>
+    }
+
     @if (s.UncategorisedCount > 0)
     {
         <a class="card banner" href="@TxLink("sort")">
@@ -153,6 +176,7 @@ else
 @code {
     private BudgetSummary? s;
     private List<BudgetSummary> history = [];
+    private List<CardStatementDto> statements = [];
     private DateOnly? date;
     private string? error;
     private bool showIncome;
@@ -186,7 +210,10 @@ else
         catch (ApiException e)
         {
             error = e.Message;
+            return;
         }
+        try { statements = await Api.CardStatements(); }
+        catch (ApiException) { statements = []; /* the budget works without it */ }
     }
 
     private Task Go(DateOnly day)
@@ -233,6 +260,20 @@ else
 
     private string TxLink(string filter) =>
         $"transactions?filter={filter}&from={Fmt.Iso(s!.PeriodStart)}&to={Fmt.Iso(s.PeriodEndExclusive.AddDays(-1))}";
+
+    private static string StatementLink(CardStatementDto c) =>
+        $"transactions?account={c.AccountId}&from={Fmt.Iso(c.CycleStart)}&to={Fmt.Iso(c.ClosesOn)}";
+
+    private static string CloseLine(CardStatementDto c)
+    {
+        var closes = c.ClosesOn.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture);
+        return c.DaysToClose switch
+        {
+            0 => $"Closes today ({closes})",
+            1 => $"Closes tomorrow ({closes})",
+            _ => $"Closes {closes} · {c.DaysToClose} days"
+        };
+    }
 
     private static string Width(decimal percent) =>
         Math.Clamp(percent, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
