@@ -50,6 +50,13 @@ public class Account
 
     public bool IsArchived { get; set; }
     public DateTime? LastImportAtUtc { get; set; }
+
+    /// <summary>
+    /// Credit cards only: the day of the month the statement closes (1–31; short months use their
+    /// last day). Spending up to and including that day is on that statement. Null = not tracked.
+    /// Separate from the budget, which runs payday to payday.
+    /// </summary>
+    public int? StatementDay { get; set; }
 }
 
 /// <summary>

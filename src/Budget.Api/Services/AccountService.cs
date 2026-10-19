@@ -6,7 +6,17 @@ namespace Budget.Api.Services;
 public record AccountView(
     int Id, string Name, string Kind, string Currency, decimal Balance,
     decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived,
-    DateTimeOffset? LastImportAt);
+    DateTimeOffset? LastImportAt, int? StatementDay = null);
+
+/// <summary>
+/// Where a credit card's current statement stands. Charged = purchases on the card in the cycle less
+/// refunds; bill payments to the card aren't counted. Unfiled taps (no account) can't be included.
+/// </summary>
+public record CardStatement(
+    int AccountId, string Name, int StatementDay,
+    DateOnly CycleStart, DateOnly ClosesOn, int DaysToClose,
+    decimal ChargedSoFar, int Count,
+    DateOnly LastCycleStart, DateOnly LastClosedOn, decimal LastCharged);
 
 /// <param name="OwedToYou">What friends still owe you on bills you paid for them (not part of Net).</param>
 public record AccountsSummary(
@@ -84,7 +94,51 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
     public static AccountView ToView(Account a, decimal balance) => new(
         a.Id, a.Name, a.Kind.ToString(), a.Currency, balance, a.AnchorBalance,
         Local(a.BalanceAsOfUtc), a.CardNames, a.IsArchived,
-        a.LastImportAtUtc is { } li ? Local(li) : null);
+        a.LastImportAtUtc is { } li ? Local(li) : null, a.StatementDay);
+
+    // ---- Credit card statement cycles ----
+
+    /// <summary>The current and last statement for every active credit card that has a statement day.</summary>
+    public async Task<IReadOnlyList<CardStatement>> StatementsAsync(CancellationToken ct = default)
+    {
+        var cards = await db.Accounts.AsNoTracking()
+            .Where(a => a.Kind == AccountKind.CreditCard && !a.IsArchived && a.StatementDay != null)
+            .OrderBy(a => a.Name).ToListAsync(ct);
+        if (cards.Count == 0) return [];
+
+        var today = clock.Today;
+        var cycles = cards.ToDictionary(a => a.Id, a =>
+        {
+            var current = StatementCycle.For(today, a.StatementDay!.Value);
+            var last = StatementCycle.For(current.Start.AddDays(-1), a.StatementDay!.Value);
+            return (current, last);
+        });
+
+        var from = clock.LocalDateStartToUtc(cycles.Values.Min(c => c.last.Start));
+        var to = clock.LocalDateStartToUtc(cycles.Values.Max(c => c.current.Closes).AddDays(1));
+        var ids = cards.Select(a => a.Id).ToList();
+        var txs = await db.Transactions.AsNoTracking().Include(t => t.Category)
+            .Where(t => t.AccountId != null && ids.Contains(t.AccountId.Value) && t.OccurredAtUtc >= from && t.OccurredAtUtc < to)
+            .ToListAsync(ct);
+
+        var result = new List<CardStatement>();
+        foreach (var a in cards)
+        {
+            var (current, last) = cycles[a.Id];
+            var mine = txs.Where(t => t.AccountId == a.Id)
+                .Select(t => (Date: clock.ToLocalDate(t.OccurredAtUtc), t.Amount, t.IsIncome, Payment: t.Category?.Bucket == Bucket.Transfer))
+                .ToList();
+            var (charged, count) = StatementMath.Charged(mine.Where(t => t.Date >= current.Start && t.Date <= current.Closes)
+                .Select(t => (t.Amount, t.IsIncome, t.Payment)));
+            var (lastCharged, _) = StatementMath.Charged(mine.Where(t => t.Date >= last.Start && t.Date <= last.Closes)
+                .Select(t => (t.Amount, t.IsIncome, t.Payment)));
+
+            result.Add(new CardStatement(a.Id, a.Name, a.StatementDay!.Value,
+                current.Start, current.Closes, current.Closes.DayNumber - today.DayNumber,
+                charged, count, last.Start, last.Closes, lastCharged));
+        }
+        return result;
+    }
 
     private static DateTimeOffset Local(DateTime utc) =>
         new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToOffset(Sgt);

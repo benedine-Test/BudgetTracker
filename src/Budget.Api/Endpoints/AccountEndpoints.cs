@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Budget.Api.Endpoints;
 
 /// <summary>Balance is what the bank shows now (or at AsOf, ISO date/time; blank = now).</summary>
-public record AccountCreate(string Name, AccountKind Kind, string? Currency, decimal Balance, string? AsOf, string? CardNames);
-public record AccountUpdate(string? Name, AccountKind? Kind, string? CardNames, bool? IsArchived);
+public record AccountCreate(string Name, AccountKind Kind, string? Currency, decimal Balance, string? AsOf, string? CardNames, int? StatementDay = null);
+/// <param name="StatementDay">Null leaves it as it is; 0 stops tracking the statement.</param>
+public record AccountUpdate(string? Name, AccountKind? Kind, string? CardNames, bool? IsArchived, int? StatementDay = null);
 public record BalanceSet(decimal Balance, string? AsOf);
 
 /// <summary>
@@ -31,6 +32,10 @@ public static class AccountEndpoints
         api.MapGet("/accounts", async (bool? archived, AccountService svc, CancellationToken ct) =>
             Results.Ok(await svc.SummaryAsync(archived == true, ct)));
 
+        // Each credit card's current statement: spent so far this cycle, days until it closes, last statement.
+        api.MapGet("/accounts/statements", async (AccountService svc, CancellationToken ct) =>
+            Results.Ok(await svc.StatementsAsync(ct)));
+
         api.MapPost("/accounts", async (AccountCreate body, BudgetDbContext db, AccountService svc, Clock clock, CancellationToken ct) =>
         {
             var name = body.Name?.Trim();
@@ -38,6 +43,7 @@ public static class AccountEndpoints
             if (name.Length > 100) return Results.BadRequest(new { message = "Keep the name under 100 characters." });
             var currency = string.IsNullOrWhiteSpace(body.Currency) ? (await db.Settings.SingleAsync(ct)).BaseCurrency : body.Currency.Trim().ToUpperInvariant();
             if (currency.Length != 3) return Results.BadRequest(new { message = "Currency must be a 3-letter code like SGD." });
+            if (body.StatementDay is < 0 or > 31) return Results.BadRequest(new { message = StatementDayProblem });
 
             var a = new Account
             {
@@ -46,7 +52,8 @@ public static class AccountEndpoints
                 Currency = currency,
                 AnchorBalance = Math.Round(body.Balance, 2),
                 BalanceAsOfUtc = clock.ParseToUtc(body.AsOf),
-                CardNames = CleanCards(body.CardNames)
+                CardNames = CleanCards(body.CardNames),
+                StatementDay = body.Kind == AccountKind.CreditCard && body.StatementDay is > 0 ? body.StatementDay : null
             };
             db.Accounts.Add(a);
             await db.SaveChangesAsync(ct);
@@ -67,6 +74,13 @@ public static class AccountEndpoints
             }
             if (body.Kind is AccountKind k) a.Kind = k;
             if (body.IsArchived is bool arch) a.IsArchived = arch;
+            if (body.StatementDay is int sd)
+            {
+                if (sd is < 0 or > 31) return Results.BadRequest(new { message = StatementDayProblem });
+                a.StatementDay = sd == 0 ? null : sd;
+            }
+            // Only cards have statements.
+            if (a.Kind != AccountKind.CreditCard) a.StatementDay = null;
             var linked = 0;
             if (body.CardNames is not null)
             {
@@ -170,6 +184,8 @@ public static class AccountEndpoints
             catch (ImportUndoException e) { return Results.Conflict(new { message = e.Message }); }
         });
     }
+
+    private const string StatementDayProblem = "Statement day must be between 1 and 31 (0 to stop tracking it).";
 
     private static string? CleanCards(string? cards)
     {
