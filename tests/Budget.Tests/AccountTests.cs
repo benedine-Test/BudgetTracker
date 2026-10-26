@@ -473,7 +473,7 @@ public sealed class StatementImportTests : IDisposable
         await _accounts.CommitAsync(card, [Line(10, "GRAB* RIDE", 50m, false)], [], null, null);
 
         var grab = await _db.Transactions.Include(t => t.Category).SingleAsync(t => t.Merchant == "GRAB* RIDE");
-        Assert.Equal("Transport", grab.Category?.Name);
+        Assert.Equal(Seed.PrivateTransport, grab.Category?.Name);
     }
 
     [Fact]
