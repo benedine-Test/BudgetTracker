@@ -291,3 +291,15 @@ public class PolicyValuation
     public decimal AccumulationUnits { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// A detected subscription marked "not a subscription": charges from this merchant pattern at about
+/// this amount (see Recurring.Similar) are no longer offered. Removing the row brings it back.
+/// </summary>
+public class DismissedRecurring
+{
+    public int Id { get; set; }
+    public string Pattern { get; set; } = "";
+    public decimal Amount { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+}

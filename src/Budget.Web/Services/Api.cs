@@ -36,6 +36,16 @@ public record CardStatementDto(int AccountId, string Name, int StatementDay,
     DateOnly CycleStart, DateOnly ClosesOn, int DaysToClose, decimal ChargedSoFar, int Count,
     DateOnly LastCycleStart, DateOnly LastClosedOn, decimal LastCharged);
 
+/// <summary>Cadence: "Monthly" | "Quarterly" | "Yearly". Status: "active" | "late" | "cancelled".</summary>
+public record RecurringDto(string Pattern, string Name, string Cadence, string Currency,
+    decimal Amount, decimal? PreviousAmount, decimal MonthlyCost, DateOnly FirstCharged, DateOnly LastCharged, int Count,
+    DateOnly NextDue, int DaysToNext, string Status, string? Category, int? AccountId);
+
+public record SubscriptionsDto(decimal MonthlyTotal, decimal YearlyTotal, decimal DueNext30Days, string Currency,
+    List<RecurringDto> Items, int Dismissed);
+
+public record DismissedDto(int Id, string Pattern, decimal Amount, DateTime CreatedAtUtc);
+
 public record AccountsSummary(decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
     int UnassignedSinceOldest, List<AccountDto> Accounts, decimal OwedToYou = 0);
 
@@ -240,6 +250,17 @@ public class Api(HttpClient http)
         Send(HttpMethod.Put, $"api/accounts/{id}", new { name, kind, cardNames, isArchived, statementDay });
 
     public Task<List<CardStatementDto>> CardStatements() => Get<List<CardStatementDto>>("api/accounts/statements");
+
+    // ---- Subscriptions ----
+    public Task<SubscriptionsDto> Subscriptions() => Get<SubscriptionsDto>("api/subscriptions");
+
+    /// <summary>"Not a subscription": stops offering this merchant at about this amount.</summary>
+    public Task<SubscriptionsDto> DismissSubscription(string pattern, decimal amount) =>
+        Post<SubscriptionsDto>("api/subscriptions/dismiss", new { pattern, amount });
+
+    public Task<List<DismissedDto>> DismissedSubscriptions() => Get<List<DismissedDto>>("api/subscriptions/dismissed");
+
+    public Task RestoreSubscription(int id) => Send(HttpMethod.Delete, $"api/subscriptions/dismissed/{id}");
 
     /// <summary>"The bank shows this now" — the balance counts on from here.</summary>
     public Task SetBalance(int id, decimal balance) =>

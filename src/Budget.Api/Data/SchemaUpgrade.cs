@@ -281,6 +281,32 @@ public static class SchemaUpgrade
                     ? "CREATE INDEX [IX_PolicyValuations_HoldingId] ON [PolicyValuations] ([HoldingId]);"
                     : "CREATE INDEX \"IX_PolicyValuations_HoldingId\" ON \"PolicyValuations\" (\"HoldingId\");", ct);
             }
+
+            // ---- Subscriptions marked "not a subscription" ----
+            if (!await TableExistsAsync(conn, "DismissedRecurring", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [DismissedRecurring] (
+                          [Id] int NOT NULL IDENTITY,
+                          [Pattern] nvarchar(100) NOT NULL,
+                          [Amount] decimal(18,2) NOT NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_DismissedRecurring] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "DismissedRecurring" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_DismissedRecurring" PRIMARY KEY AUTOINCREMENT,
+                          "Pattern" TEXT NOT NULL,
+                          "Amount" TEXT NOT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_DismissedRecurring_Pattern] ON [DismissedRecurring] ([Pattern]);"
+                    : "CREATE INDEX \"IX_DismissedRecurring_Pattern\" ON \"DismissedRecurring\" (\"Pattern\");", ct);
+            }
         }
         finally
         {

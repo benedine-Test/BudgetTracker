@@ -14,6 +14,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<PolicyTerms> PolicyTerms => Set<PolicyTerms>();
     public DbSet<PolicyValuation> PolicyValuations => Set<PolicyValuation>();
+    public DbSet<DismissedRecurring> DismissedRecurring => Set<DismissedRecurring>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -92,6 +93,13 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(v => v.InitialUnits).HasPrecision(18, 2);
             e.Property(v => v.AccumulationUnits).HasPrecision(18, 2);
             e.HasIndex(v => v.HoldingId);
+        });
+
+        b.Entity<DismissedRecurring>(e =>
+        {
+            e.Property(d => d.Pattern).HasMaxLength(100);
+            e.Property(d => d.Amount).HasPrecision(18, 2);
+            e.HasIndex(d => d.Pattern);
         });
     }
 }
