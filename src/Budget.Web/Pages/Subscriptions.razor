@@ -1,0 +1,250 @@
+@page "/subscriptions"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Subscriptions</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Subscriptions</h1>
+        <p class="sub">Regular charges found in your spending</p>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (v is null)
+{
+    <Loading />
+}
+else if (v.Items.Count == 0)
+{
+    <section class="card notice">
+        <h2>None found yet</h2>
+        <p>A charge from the same shop, at about the same amount, every month, quarter or year shows up here. It needs three charges, or two if it's filed under Subscriptions. Importing a few months of statements fills it in quickly.</p>
+        <a class="btn primary" href="accounts">Go to Accounts</a>
+    </section>
+}
+else
+{
+    <section class="card hero">
+        <span class="label">Every month</span>
+        <span class="big">@Fmt.Money(v.MonthlyTotal, v.Currency)</span>
+        <span class="sub">@Fmt.Money(v.YearlyTotal, v.Currency) a year · @Fmt.Money(v.DueNext30Days, v.Currency) due in the next 30 days</span>
+    </section>
+
+    @if (Running.Any())
+    {
+        <section>
+            <div class="day-head"><h2>Running</h2></div>
+            <div class="card rows">
+                @foreach (var r in Running)
+                {
+                    <button type="button" class="row tx" @onclick="() => selected = r">
+                        <span class="row-main">
+                            <span class="tx-name">@r.Name</span>
+                            <span class="muted">@Every(r) · @DueLine(r)</span>
+                            @if (r.Status == "late")
+                            {
+                                <span class="tag warn">Not charged yet: due @Short(r.NextDue)</span>
+                            }
+                            @if (r.PreviousAmount is { } was)
+                            {
+                                <span class="tag warn">@(r.Amount > was ? "Up" : "Down") from @Fmt.Money(was, r.Currency)</span>
+                            }
+                        </span>
+                        <span class="row-end">
+                            <span class="num">@Fmt.Money(r.Amount, r.Currency)</span>
+                            @if (r.Cadence != "Monthly")
+                            {
+                                <span class="muted small">@Fmt.Money(r.MonthlyCost, r.Currency)/mo</span>
+                            }
+                        </span>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+
+    @if (Ended.Any())
+    {
+        <section>
+            <div class="day-head"><h2>Looks cancelled</h2></div>
+            <div class="card rows">
+                @foreach (var r in Ended)
+                {
+                    <button type="button" class="row tx" @onclick="() => selected = r">
+                        <span class="row-main">
+                            <span class="tx-name">@r.Name</span>
+                            <span class="muted">Last charged @Short(r.LastCharged)</span>
+                        </span>
+                        <span class="row-end">
+                            <span class="num muted">@Fmt.Money(r.Amount, r.Currency)</span>
+                        </span>
+                    </button>
+                }
+            </div>
+        </section>
+        <p class="hint center">No charge for a whole cycle past its due date, so it isn't in the totals.</p>
+    }
+
+    @if (v.Items.Any(i => i.Currency != v.Currency))
+    {
+        <p class="hint center">Charges in currencies other than @v.Currency aren't in the totals.</p>
+    }
+}
+
+@if (v is not null && v.Dismissed > 0)
+{
+    <p class="hint center">
+        @v.Dismissed marked not a subscription.
+        <button type="button" class="link" @onclick="OpenDismissed">Show</button>
+    </p>
+}
+
+@if (selected is not null)
+{
+    <Sheet Title="@selected.Name" OnClose="() => selected = null">
+        <p class="sheet-amount">@Fmt.Money(selected.Amount, selected.Currency)</p>
+        <p class="muted">
+            @Every(selected) · @selected.Count charges since @Short(selected.FirstCharged)@(selected.Category is { } c ? $" · {c}" : "")
+        </p>
+        <p class="muted">
+            Last charged @Short(selected.LastCharged).
+            @(selected.Status == "cancelled" ? "Nothing since." : $"Next expected {Short(selected.NextDue)}.")
+        </p>
+        @if (selected.PreviousAmount is { } was)
+        {
+            <p class="muted">The latest charge was @Fmt.Money(selected.Amount, selected.Currency); the one before it was @Fmt.Money(was, selected.Currency).</p>
+        }
+
+        <a class="btn primary block" href="@($"transactions?q={Uri.EscapeDataString(selected.Pattern)}")">See the charges</a>
+        <button type="button" class="btn block" disabled="@busy" @onclick="Dismiss">Not a subscription</button>
+        <p class="hint">Hides it here. Other charges from @selected.Name at a different amount can still show up.</p>
+    </Sheet>
+}
+
+@if (dismissed is not null)
+{
+    <Sheet Title="Not subscriptions" OnClose="() => dismissed = null">
+        @if (dismissed.Count == 0)
+        {
+            <p class="muted">Nothing hidden.</p>
+        }
+        else
+        {
+            <div class="rows">
+                @foreach (var d in dismissed)
+                {
+                    <div class="row static">
+                        <span class="row-main">
+                            <span class="tx-name">@d.Pattern</span>
+                            <span class="muted">about @Fmt.Money(d.Amount)</span>
+                        </span>
+                        <span class="row-end">
+                            <button type="button" class="btn small" disabled="@busy" @onclick="() => Restore(d)">Bring back</button>
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    </Sheet>
+}
+
+@code {
+    private SubscriptionsDto? v;
+    private RecurringDto? selected;
+    private List<DismissedDto>? dismissed;
+    private string? error;
+    private bool busy;
+
+    private IEnumerable<RecurringDto> Running => v!.Items.Where(i => i.Status != "cancelled");
+    private IEnumerable<RecurringDto> Ended => v!.Items.Where(i => i.Status == "cancelled");
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            v = await Api.Subscriptions();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private async Task Dismiss()
+    {
+        if (selected is null) return;
+        busy = true;
+        try
+        {
+            v = await Api.DismissSubscription(selected.Pattern, selected.Amount);
+            Toast.Show($"{selected.Name} hidden.");
+            selected = null;
+        }
+        catch (ApiException e)
+        {
+            Toast.Show(e.Message, isError: true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task OpenDismissed()
+    {
+        try
+        {
+            dismissed = await Api.DismissedSubscriptions();
+        }
+        catch (ApiException e)
+        {
+            Toast.Show(e.Message, isError: true);
+        }
+    }
+
+    private async Task Restore(DismissedDto d)
+    {
+        busy = true;
+        try
+        {
+            await Api.RestoreSubscription(d.Id);
+            dismissed = await Api.DismissedSubscriptions();
+            await Load();
+            if (dismissed.Count == 0) dismissed = null;
+        }
+        catch (ApiException e)
+        {
+            Toast.Show(e.Message, isError: true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string Every(RecurringDto r) => r.Cadence switch
+    {
+        "Quarterly" => "Every 3 months",
+        "Yearly" => "Every year",
+        _ => "Every month"
+    };
+
+    private static string DueLine(RecurringDto r) => r.DaysToNext switch
+    {
+        var d when d < 0 => $"was due {Short(r.NextDue)}",
+        0 => "due today",
+        1 => "due tomorrow",
+        _ => $"next {Short(r.NextDue)} · {r.DaysToNext} days"
+    };
+
+    private static string Short(DateOnly d) =>
+        d.ToString(d.Year == Fmt.Today.Year ? "d MMM" : "d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+}

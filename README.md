@@ -25,6 +25,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Spending** — every entry by day, search, filters, tap to categorise (and remember the shop), add by hand, delete.
 - **Accounts** — every bank account and card with its balance now, the total in the bank, and what's owed on cards. Import a statement to add anything the app missed.
 - **Invest** — total value, gain/loss, mix by type, holdings. Share, ETF and crypto prices and exchange rates update each time the screen opens. CPF and cash are entered as a single balance, and a salary recorded from base pay adds its CPF (yours and your employer's) to the CPF balance until you type in a new figure; an insurance plan (ILP) as what you've paid in and what it's worth. Regular payments from the bank (a monthly GIRO premium, a savings plan) are counted as they come in.
+- **Subscriptions** (linked from Budget) — regular charges found in your spending, with what they cost a month and a year, when each is next due, price changes, and ones that look cancelled. See *Subscriptions* below.
 - **Total assets** (linked from Accounts and Invest) — bank and cash balances plus everything under Invest in one figure, with the mix, every item, and net worth after what's owed on cards.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 
@@ -94,7 +95,18 @@ What it does for you: card bill payments are filed as **Transfer** so they don't
 
 Limits: scanned PDFs can't be read. A consolidated statement covering several accounts lists all of their lines — untick the ones that belong elsewhere. Up to 4 MB per PDF or Excel file, 2 MB per CSV. Balances in a currency other than SGD aren't added to the total.
 
-**Existing databases** are upgraded on startup (the `Accounts`, `ImportBatches`, `PolicyTerms` and `PolicyValuations` tables, `Transactions.AccountId` / `ImportBatchId` / `MyShare` / `SharedWith` / `RepaysId` and the Paid Back category are added if missing), so publishing over the live site keeps your data.
+**Existing databases** are upgraded on startup (the `Accounts`, `ImportBatches`, `PolicyTerms`, `PolicyValuations` and `DismissedRecurring` tables, `Transactions.AccountId` / `ImportBatchId` / `MyShare` / `SharedWith` / `RepaysId` and the Paid Back category are added if missing), so publishing over the live site keeps your data.
+
+## Subscriptions
+
+Nothing to set up: the app looks through the last 25 months of spending for the same shop charging about the same amount every month, quarter or year.
+
+- **What counts.** Same merchant (matched the way category rules are, so `NETFLIX.COM 866-579-7172` and `NETFLIX.COM` are one), amounts within 15% (or S$1) of each other, and gaps of 25–35 days (monthly), 80–100 (quarterly) or 350–380 (yearly). One missed or unimported charge is fine. It needs **three charges**, or **two** if they're filed under Subscriptions — so a yearly plan shows once its category is Subscriptions. Transfers, income and bus/MRT are left out; weekly patterns aren't looked for (they're mostly groceries and coffee). On a shared bill only your share counts.
+- **One shop, several plans.** Charges at clearly different amounts are kept apart (Apple: iCloud at S$1.28 and Music at S$10.98), while a price rise stays one subscription and is flagged *Up from S$10.98*.
+- **Next due** is the last charge plus one cycle, on the usual day (a plan charged on the 31st is due on the 31st again after February).
+- **Late / looks cancelled.** Past due by more than 5 days (monthly; 10 quarterly, 20 yearly) it shows *Not charged yet*. With no charge 35 days past due (60 for quarterly and yearly) it moves to *Looks cancelled* and drops out of the totals; it disappears altogether after a few months.
+- **Totals** are the running ones in your base currency: per month (a yearly plan ÷ 12), per year, and due in the next 30 days.
+- **Not a subscription.** Tap one → *Not a subscription* to hide it. It's remembered by merchant and amount, so another plan from the same shop can still show. *Show* at the bottom of the screen brings hidden ones back.
 
 ## iPhone Shortcut (Apple Pay auto-capture)
 
@@ -153,6 +165,9 @@ Things to check in your first week:
 | GET/PUT | `/api/holdings/{id}/policy` | ILP terms: `{commencementDate, monthlyPremium, initialPeriodMonths, minimumInvestmentYears, premiumTermYears?, schedule?, bankText?}` → statements with surrender value, bank premium check |
 | POST/DELETE | `/api/holdings/{id}/policy/valuations[/{valuationId}]` | `{asOf, initialUnits, accumulationUnits}` from a statement |
 | GET | `/api/holdings/{id}/policy/projection?rate=4&rate=8&from=start` | Account and surrender value per policy year (`from=latest` starts at the newest statement) |
+| GET | `/api/subscriptions` | Detected subscriptions: `{monthlyTotal, yearlyTotal, dueNext30Days, currency, items: [{pattern, name, cadence, amount, previousAmount, monthlyCost, lastCharged, nextDue, daysToNext, status: active\|late\|cancelled, …}], dismissed}` |
+| POST | `/api/subscriptions/dismiss` | `{pattern, amount}` — not a subscription; returns the updated list |
+| GET/DELETE | `/api/subscriptions/dismissed[/{id}]` | Hidden ones; delete brings one back |
 | GET | `/api/export/transactions.csv` | Everything, spreadsheet-safe |
 | GET | `/api/accounts?archived=true` | Balances: in accounts, owed on cards, net, unfiled entry count, owed to you by friends |
 | POST/PUT/DELETE | `/api/accounts[/{id}]` | `{name, kind: Bank\|CreditCard\|Cash, balance, asOf?, cardNames}` — delete keeps entries, unfiled |
@@ -193,5 +208,4 @@ Things to check in your first week:
 ## Next steps
 
 1. Bank email parsers — depends on which banks and cards are used.
-2. Recurring bill / subscription detection.
-3. Automatic price and FX refresh.
+2. Automatic price and FX refresh.

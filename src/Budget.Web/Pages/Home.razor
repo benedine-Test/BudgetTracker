@@ -86,6 +86,25 @@ else
         </section>
     }
 
+    @if (IsCurrent && subs is not null && subs.Items.Count > 0)
+    {
+        var next = subs.Items.Where(i => i.Status != "cancelled").MinBy(i => i.NextDue);
+        <section class="card">
+            <h2>Subscriptions</h2>
+            <div class="rows">
+                <a class="row" href="subscriptions">
+                    <span class="row-main">
+                        <span>@Fmt.Money(subs.MonthlyTotal, subs.Currency) a month</span>
+                        <span class="muted">@(next is null ? "None running" : $"Next: {next.Name}, {Fmt.Money(next.Amount, next.Currency)} {DueIn(next)}")</span>
+                    </span>
+                    <span class="row-end">
+                        <span class="muted small">@Fmt.Money(subs.YearlyTotal, subs.Currency) a year</span>
+                    </span>
+                </a>
+            </div>
+        </section>
+    }
+
     @if (s.UncategorisedCount > 0)
     {
         <a class="card banner" href="@TxLink("sort")">
@@ -177,6 +196,7 @@ else
     private BudgetSummary? s;
     private List<BudgetSummary> history = [];
     private List<CardStatementDto> statements = [];
+    private SubscriptionsDto? subs;
     private DateOnly? date;
     private string? error;
     private bool showIncome;
@@ -214,6 +234,8 @@ else
         }
         try { statements = await Api.CardStatements(); }
         catch (ApiException) { statements = []; /* the budget works without it */ }
+        try { subs = await Api.Subscriptions(); }
+        catch (ApiException) { subs = null; }
     }
 
     private Task Go(DateOnly day)
@@ -274,6 +296,14 @@ else
             _ => $"Closes {closes} · {c.DaysToClose} days"
         };
     }
+
+    private static string DueIn(RecurringDto r) => r.DaysToNext switch
+    {
+        var d when d < 0 => "is late",
+        0 => "today",
+        1 => "tomorrow",
+        _ => $"in {r.DaysToNext} days"
+    };
 
     private static string Width(decimal percent) =>
         Math.Clamp(percent, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";

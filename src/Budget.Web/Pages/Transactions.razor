@@ -192,6 +192,8 @@ else
     [SupplyParameterFromQuery] public string? To { get; set; }
     /// <summary>An account id, or "none" for entries not filed under any account.</summary>
     [SupplyParameterFromQuery(Name = "account")] public string? AccountParam { get; set; }
+    /// <summary>Starts with this search filled in (a subscription links to its charges).</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
 
     private List<TransactionDto>? items;
     private List<CategoryDto> categories = [];
@@ -231,6 +233,8 @@ else
         "all" => "Nothing here yet. Apple Pay taps appear on their own, or use Add.",
         _ => "Nothing in this group for these dates."
     };
+
+    protected override void OnInitialized() => search = Q ?? "";
 
     protected override Task OnParametersSetAsync() => Load();
 
