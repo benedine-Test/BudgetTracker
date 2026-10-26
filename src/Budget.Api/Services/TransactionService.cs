@@ -24,7 +24,7 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
         string merchant, string? cardName, DateTime occurredAtUtc, TransactionSource source, CancellationToken ct = default)
     {
         var categoryId = await categorizer.MatchAsync(merchant, ct)
-            ?? (await db.Categories.FirstOrDefaultAsync(c => c.Name == "Transport", ct))?.Id;
+            ?? (await db.Categories.FirstOrDefaultAsync(c => c.Name == Seed.PublicTransport, ct))?.Id;
 
         var tx = new Transaction
         {

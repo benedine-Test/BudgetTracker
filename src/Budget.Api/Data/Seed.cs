@@ -5,13 +5,21 @@ namespace Budget.Api.Data;
 
 public static class Seed
 {
+    /// <summary>Bus, MRT/LRT and other fares on the card ("BUS/MRT", SimplyGo, SBS Transit...).</summary>
+    public const string PublicTransport = "Bus & Train";
+    /// <summary>Taxis, Grab/Gojek rides and running your own car (fuel).</summary>
+    public const string PrivateTransport = "Taxi & Car";
+    /// <summary>The single category both of the above replaced.</summary>
+    private const string OldTransport = "Transport";
+
     private static readonly (string Name, Bucket Bucket)[] Categories =
     [
         // Needs
         ("Housing", Bucket.Needs),
         ("Utilities", Bucket.Needs),
         ("Groceries", Bucket.Needs),
-        ("Transport", Bucket.Needs),
+        (PublicTransport, Bucket.Needs),
+        (PrivateTransport, Bucket.Needs),
         ("Telco & Internet", Bucket.Needs),
         ("Insurance", Bucket.Needs),
         ("Healthcare", Bucket.Needs),
@@ -46,17 +54,19 @@ public static class Seed
         ("GRABMART", "Groceries", 10),
         ("FOODPANDA", "Dining & Food Delivery", 20),
         ("DELIVEROO", "Dining & Food Delivery", 20),
-        ("GRAB", "Transport", 50),
-        ("GOJEK", "Transport", 50),
-        ("TADA", "Transport", 50),
-        ("BUS/MRT", "Transport", 20),
-        ("SIMPLYGO", "Transport", 20),
-        ("SMRT", "Transport", 30),
-        ("SBS TRANSIT", "Transport", 30),
-        ("SHELL", "Transport", 40),
-        ("ESSO", "Transport", 40),
-        ("CALTEX", "Transport", 40),
-        ("SPC ", "Transport", 40),
+        ("GRAB", PrivateTransport, 50),
+        ("GOJEK", PrivateTransport, 50),
+        ("TADA", PrivateTransport, 50),
+        ("COMFORTDELGRO", PrivateTransport, 30),
+        ("BUS/MRT", PublicTransport, 20),
+        ("SIMPLYGO", PublicTransport, 20),
+        ("TRANSITLINK", PublicTransport, 20),
+        ("SMRT", PublicTransport, 30),
+        ("SBS TRANSIT", PublicTransport, 30),
+        ("SHELL", PrivateTransport, 40),
+        ("ESSO", PrivateTransport, 40),
+        ("CALTEX", PrivateTransport, 40),
+        ("SPC ", PrivateTransport, 40),
         ("FAIRPRICE", "Groceries", 20),
         ("NTUC", "Groceries", 30),
         ("COLD STORAGE", "Groceries", 20),
@@ -121,10 +131,45 @@ public static class Seed
                 Priority = r.Priority
             }));
         }
-        // Added after the first release, so databases seeded before it don't have it yet.
-        else if (!await db.Categories.AnyAsync(c => c.Name == SharedBills.RepaymentCategory))
-            db.Categories.Add(new Category { Name = SharedBills.RepaymentCategory, Bucket = Bucket.Income });
+        else
+        {
+            // Added after the first release, so databases seeded before it don't have it yet.
+            if (!await db.Categories.AnyAsync(c => c.Name == SharedBills.RepaymentCategory))
+                db.Categories.Add(new Category { Name = SharedBills.RepaymentCategory, Bucket = Bucket.Income });
+
+            await SplitTransportAsync(db);
+        }
 
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Databases from before the split have one "Transport" category. It's renamed to
+    /// <see cref="PrivateTransport"/> (so its id, and anything pointing at it, stays valid), and
+    /// the bus/train rules and spending move to a new <see cref="PublicTransport"/> category.
+    /// </summary>
+    private static async Task SplitTransportAsync(BudgetDbContext db)
+    {
+        var old = await db.Categories.FirstOrDefaultAsync(c => c.Name == OldTransport);
+        if (old is null || await db.Categories.AnyAsync(c => c.Name == PublicTransport)) return;
+
+        old.Name = PrivateTransport;
+        var transit = new Category { Name = PublicTransport, Bucket = old.Bucket, IsArchived = old.IsArchived };
+        db.Categories.Add(transit);
+        await db.SaveChangesAsync();
+
+        foreach (var rule in await db.MerchantRules.Where(r => r.CategoryId == old.Id).ToListAsync())
+            if (MerchantText.IsTransit(rule.Pattern))
+                rule.CategoryId = transit.Id;
+
+        // A seeded rule the old database never had.
+        if (!await db.MerchantRules.AnyAsync(r => r.Pattern == "TRANSITLINK"))
+            db.MerchantRules.Add(new MerchantRule { Pattern = "TRANSITLINK", CategoryId = transit.Id, Priority = 20 });
+        if (!await db.MerchantRules.AnyAsync(r => r.Pattern == "COMFORTDELGRO"))
+            db.MerchantRules.Add(new MerchantRule { Pattern = "COMFORTDELGRO", CategoryId = old.Id, Priority = 30 });
+
+        foreach (var tx in await db.Transactions.Where(t => t.CategoryId == old.Id).ToListAsync())
+            if (MerchantText.IsTransit(tx.Merchant))
+                tx.CategoryId = transit.Id;
     }
 }
