@@ -24,6 +24,9 @@ public record TransactionDto(int Id, DateTimeOffset OccurredAt, decimal Amount, 
     public decimal Counted => MyShare ?? Amount;
 }
 
+/// <summary>On money out of a bank account: the card it paid, if that side is in the app, and the card its wording points to.</summary>
+public record CardPaymentDto(TransactionDto? OnCard, int? SuggestedAccountId);
+
 public record OwedDto(TransactionDto Bill, decimal Owed, decimal Repaid);
 
 public record OwedList(decimal Total, List<OwedDto> Bills);
@@ -229,6 +232,12 @@ public class Api(HttpClient http)
     /// <summary>Bills with money still owed back, the ones a repayment of <paramref name="amount"/> fits first.</summary>
     public Task<OwedList> Owed(decimal? amount = null) =>
         Get<OwedList>("api/owed" + (amount is { } a ? "?amount=" + a.ToString(System.Globalization.CultureInfo.InvariantCulture) : ""));
+
+    public Task<CardPaymentDto> CardPayment(int id) => Get<CardPaymentDto>($"api/transactions/{id}/card-payment");
+
+    /// <summary>Logs a payment out of the bank as paying off a card.</summary>
+    public Task<CardPaymentDto> PayCard(int id, int cardAccountId) =>
+        Post<CardPaymentDto>($"api/transactions/{id}/card-payment", new { accountId = cardAccountId });
 
     public Task DeleteTransaction(int id) => Send(HttpMethod.Delete, $"api/transactions/{id}");
 

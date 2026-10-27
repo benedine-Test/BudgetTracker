@@ -24,6 +24,11 @@ public record ShareUpdate(decimal? MyShare, string? SharedWith);
 /// <summary>Either an existing money-in entry (RepaymentId), or a new one to record (Amount, Date, AccountId, Note).</summary>
 public record RepaymentIn(int? RepaymentId, decimal? Amount, string? Date, int? AccountId, string? Note);
 
+public record PaysCard(int AccountId);
+/// <param name="OnCard">On money out of a bank account: the same payment arriving on a card, if it's in the app.</param>
+/// <param name="SuggestedAccountId">The card the bank's wording points to, when it can tell.</param>
+public record CardPaymentDto(TransactionDto? OnCard, int? SuggestedAccountId);
+
 /// <param name="Owed">On a shared bill: what's still owed back. Null when the bill isn't shared.</param>
 public record TransactionDto(
     int Id, DateTimeOffset OccurredAt, decimal Amount, string Currency, bool IsIncome,
@@ -250,6 +255,32 @@ public static class TransactionEndpoints
             return Results.Ok(new OwedList(
                 open.Where(o => o.Bill.Currency == settings.BaseCurrency).Sum(o => o.Owed),
                 open.Select(o => new OwedDto(ToDto(o.Bill, o.Repaid), o.Owed, o.Repaid)).ToList()));
+        });
+
+        // ---- Card bills paid from the bank ----
+        api.MapGet("/transactions/{id:int}/card-payment", async (int id, BudgetDbContext db, Clock clock, CancellationToken ct) =>
+        {
+            var t = await db.Transactions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (t is null) return Results.NotFound();
+            var onCard = t.IsIncome ? null : await new CardPayments(db, clock).OnCardAsync(t, ct);
+            if (onCard is not null) await LoadRefsAsync(db, onCard, ct);
+            var cards = await db.Accounts.AsNoTracking().Where(a => a.Kind == AccountKind.CreditCard).ToListAsync(ct);
+            return Results.Ok(new CardPaymentDto(onCard is null ? null : ToDto(onCard), CardPayments.GuessCard(t.Merchant, cards)?.Id));
+        });
+
+        // Paid a card bill from the bank: log it on the card so what's owed drops now, not at the next statement.
+        api.MapPost("/transactions/{id:int}/card-payment", async (int id, PaysCard body, BudgetDbContext db, Clock clock, CancellationToken ct) =>
+        {
+            try
+            {
+                var onCard = await new CardPayments(db, clock).LogAsync(id, body.AccountId, ct);
+                await LoadRefsAsync(db, onCard, ct);
+                return Results.Ok(new CardPaymentDto(ToDto(onCard), body.AccountId));
+            }
+            catch (CardPaymentException e)
+            {
+                return Results.BadRequest(new { message = e.Message });
+            }
         });
 
         // Categorise + teach: fixes this one, saves a rule, and re-files similar unconfirmed ones.

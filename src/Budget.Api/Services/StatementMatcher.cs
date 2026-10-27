@@ -67,7 +67,8 @@ public static class StatementMatcher
         if (d.Contains("PAYMENT THANK YOU") || d.Contains("PAYMENT - THANK YOU") || d.Contains("THANK YOU FOR YOUR PAYMENT"))
             return true;
         var isPayment = d.Contains("BILL PAYMENT") || d.Contains("BILL PMT") || d.Contains("CARD PAYMENT") || d.Contains("PAYMENT TO")
-                        || d.Contains("AUTO PAYMENT") || d.Contains("GIRO PAYMENT") || d.Contains("PAYMT");
+                        || d.Contains("AUTO PAYMENT") || d.Contains("GIRO PAYMENT") || d.Contains("PAYMT")
+                        || d.StartsWith("BILL ", StringComparison.Ordinal); // DBS iBanking: "BILL DBSC-4119… : I-BANK"
         // DBSC is how DBS/POSB name their own cards on a bill payment.
         var isCard = d.Contains("CARD") || d.Contains("VISA") || d.Contains("MASTERCARD") || d.Contains("AMEX") || d.Contains("CREDIT")
                      || d.Split(' ', '-', ':').Any(w => w.StartsWith("DBSC", StringComparison.Ordinal));

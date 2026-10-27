@@ -1,0 +1,98 @@
+@* A card bill paid from the bank: log it on the card, so what's owed drops now rather than at the next card statement. *@
+@inject Api Api
+@inject Toast Toast
+
+@if (Shown)
+{
+    <h3 class="group-title">Paid a card bill?</h3>
+    @if (info is null)
+    {
+        <p class="hint">Checking the cards…</p>
+    }
+    else if (info.OnCard is { } there)
+    {
+        <p>
+            On <strong>@there.Account</strong>: +@Fmt.Money(there.Amount, there.Currency) on @Fmt.Day(DateOnly.FromDateTime(there.OccurredAt.DateTime)).
+            <span class="muted">It's taken off what's owed on the card.</span>
+        </p>
+    }
+    else
+    {
+        <label for="cp-card">Card it paid</label>
+        <select id="cp-card" @bind="cardId" disabled="@busy">
+            <option value="0">Pick a card</option>
+            @foreach (var c in Cards)
+            {
+                <option value="@c.Id">@c.Name</option>
+            }
+        </select>
+        <p class="hint">Adds @Fmt.Money(Tx.Amount, Tx.Currency) as paid onto the card, so what's owed drops now. When the card's statement comes in, its payment line matches this instead of being added twice.</p>
+        @if (error is not null)
+        {
+            <p class="field-error" role="alert">@error</p>
+        }
+        <button type="button" class="btn" disabled="@(busy || cardId == 0)" @onclick="Pay">Log it on the card</button>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public TransactionDto Tx { get; set; } = default!;
+    [Parameter] public List<AccountDto> Accounts { get; set; } = [];
+    /// <summary>The entry changed (it's filed as Transfer now); the list behind should reload.</summary>
+    [Parameter] public EventCallback<TransactionDto> OnChanged { get; set; }
+
+    private CardPaymentDto? info;
+    private int cardId;
+    private bool busy;
+    private string? error;
+    private int shownFor;
+
+    private List<AccountDto> Cards => Accounts.Where(a => a.Kind == "CreditCard" && !a.IsArchived).ToList();
+
+    // Money out of a bank account (or not filed yet) that's filed as a transfer, with a card in the app to pay.
+    private bool Shown => !Tx.IsIncome && Tx.Amount > 0 && Tx.Bucket == "Transfer" && Cards.Count > 0
+                          && Accounts.FirstOrDefault(a => a.Id == Tx.AccountId)?.Kind != "CreditCard";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (shownFor == Tx.Id) return;
+        shownFor = Tx.Id;
+        info = null;
+        error = null;
+        cardId = 0;
+        if (!Shown) return;
+        try
+        {
+            info = await Api.CardPayment(Tx.Id);
+            cardId = info.SuggestedAccountId ?? (Cards.Count == 1 ? Cards[0].Id : 0);
+        }
+        catch (ApiException e)
+        {
+            info = new CardPaymentDto(null, null);
+            error = e.Message;
+        }
+    }
+
+    private async Task Pay()
+    {
+        if (busy || cardId == 0) return;
+        busy = true;
+        error = null;
+        try
+        {
+            info = await Api.PayCard(Tx.Id, cardId);
+            Toast.Show($"Logged on {info.OnCard?.Account}.");
+            var updated = await Api.Transaction(Tx.Id);
+            shownFor = updated.Id; // keep showing the card side just logged
+            await OnChanged.InvokeAsync(updated);
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

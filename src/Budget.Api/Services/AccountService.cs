@@ -293,6 +293,9 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
 
         var added = 0;
         var salaries = 0;
+        var paidCards = new List<string>();
+        var cards = account.Kind == AccountKind.CreditCard ? []
+            : await db.Accounts.AsNoTracking().Where(a => a.Kind == AccountKind.CreditCard && !a.IsArchived).ToListAsync(ct);
         var settings = await budgets.GetSettingsAsync(ct);
         foreach (var r in add.OrderBy(r => r.Date))
         {
@@ -331,6 +334,17 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             };
             db.Transactions.Add(tx);
             await transactions.AbsorbPendingFaresAsync(tx, ct);
+            // A card bill paid from this bank account: log it on the card too, so what's owed drops now
+            // rather than when the card's next statement is imported (which then matches this entry).
+            if (partner is null && !r.IsCredit && cards.Count > 0 && StatementMatcher.LooksLikeCardPayment(description)
+                && CardPayments.GuessCard(description, cards) is { } card)
+            {
+                tx.Account = tracked;
+                var onCard = CardPayments.CardSide(tx, card, categoryId, TransactionSource.StatementImport);
+                onCard.ImportBatchId = batch.Id; // undoing this import takes it off the card again
+                db.Transactions.Add(onCard);
+                paidCards.Add(card.Name);
+            }
             await db.SaveChangesAsync(ct);
             added++;
         }
@@ -355,6 +369,11 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         parts.Add(added == 0 ? "Nothing was missing" : $"Added {added} missing {(added == 1 ? "entry" : "entries")}");
         if (linked > 0) parts.Add($"filed {linked} existing under {account.Name}");
         if (salaries > 0) parts.Add("salary recorded");
+        foreach (var paidCard in paidCards.Distinct())
+        {
+            var n = paidCards.Count(c => c == paidCard);
+            parts.Add($"{(n == 1 ? "a bill payment" : $"{n} bill payments")} logged on {paidCard}");
+        }
         return new ImportResult(added, linked, salaries, balance,
             $"{string.Join(", ", parts)}. Balance now {TransactionService.Money(balance, account.Currency)}.", batch.Id);
     }

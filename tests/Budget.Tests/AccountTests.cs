@@ -206,8 +206,33 @@ public class StatementMatcherTests
     [InlineData("FAST PAYMENT TO JOHN TAN", false)]
     [InlineData("BILL PAYMENT DBSC-4119 : I-BANK", true)]
     [InlineData("BILL PAYMENT SP SERVICES", false)]
+    [InlineData("BILL DBSC-4119110004783939 : I-BANK REF: 1792428", true)] // DBS iBanking's own wording
+    [InlineData("ICT UOB:7733240850:I-BANK Transfer OTHR 1792428", false)]  // a transfer, not a card bill
     public void Spots_card_bill_payments(string text, bool expected) =>
         Assert.Equal(expected, StatementMatcher.LooksLikeCardPayment(text));
+
+    [Fact]
+    public void Bill_payment_text_points_to_its_card()
+    {
+        var yuu = new Account { Id = 1, Name = "DBS yuu Visa Card", Kind = AccountKind.CreditCard };
+        var uob = new Account { Id = 2, Name = "UOB", Kind = AccountKind.CreditCard };
+        var bank = new Account { Id = 3, Name = "DBS Savings", Kind = AccountKind.Bank };
+        const string dbs = "BILL DBSC-4119110004783939 : I-BANK REF: 1792428";
+
+        Assert.Equal(1, CardPayments.GuessCard(dbs, [yuu, uob, bank])?.Id);                  // DBSC → the one DBS card
+        Assert.Equal(2, CardPayments.GuessCard("BILL PAYMENT UOB CARD", [yuu, uob, bank])?.Id);
+
+        // Two DBS cards: only the card number's last four digits can tell them apart.
+        var altitude = new Account { Id = 4, Name = "DBS Altitude", Kind = AccountKind.CreditCard };
+        Assert.Null(CardPayments.GuessCard(dbs, [yuu, altitude]));
+        yuu.CardNames = "yuu 3939";
+        Assert.Equal(1, CardPayments.GuessCard(dbs, [yuu, altitude])?.Id);
+
+        // One card in the app: it's that card, unless the text names another bank's.
+        Assert.Equal(2, CardPayments.GuessCard("PAYMENT TO CREDIT CARD", [uob])?.Id);
+        Assert.Null(CardPayments.GuessCard(dbs, [uob]));
+        Assert.Null(CardPayments.GuessCard(dbs, [bank]));
+    }
 
     [Fact]
     public void Balance_walks_forward_and_back_from_the_anchor()
@@ -451,6 +476,76 @@ public sealed class StatementImportTests : IDisposable
         // Undoing the card import puts the bank side back as it was.
         await _accounts.UndoAsync(card, result.BatchId);
         Assert.Null((await _db.Transactions.AsNoTracking().SingleAsync()).CategoryId);
+    }
+
+    [Fact]
+    public async Task Card_bill_paid_from_the_bank_is_logged_on_the_card_before_its_statement()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var yuu = await AddCardAsync("DBS yuu Visa Card");
+        var uob = await AddCardAsync("UOB");
+        yuu.AnchorBalance = -740.33m; // owed, from the statement to 6 Oct
+        await _db.SaveChangesAsync();
+
+        var result = await _accounts.CommitAsync(bank, [
+            Line(20, "BILL DBSC-4119110004783939 : I-BANK REF: 1792428", 720.73m, false),
+            Line(20, "ICT UOB:7733240850:I-BANK Transfer OTHR 1792428", 200m, false)
+        ], [], null, null);
+
+        Assert.Contains("a bill payment logged on DBS yuu Visa Card", result.Message);
+        Assert.Equal(-19.60m, await _accounts.BalanceAsync(yuu));
+        Assert.Equal(0m, await _accounts.BalanceAsync(uob)); // a plain transfer isn't taken as a card bill
+        var onCard = await _db.Transactions.Include(t => t.Category).SingleAsync(t => t.AccountId == yuu.Id);
+        Assert.True(onCard.IsIncome);
+        Assert.Equal("Transfer", onCard.Category?.Name);
+        Assert.Equal("Bill paid from DBS Savings", onCard.Merchant);
+        Assert.Equal(200m, (await _budgets.SummaryAsync(new DateOnly(2026, 10, 20))).TotalSpent); // only the ICT counts
+
+        // The card's next statement shows the payment a day later: it's the entry already there.
+        var preview = await _accounts.PreviewAsync(yuu,
+            new ParsedStatement([], new ColumnMap(), [new StatementRow(1, new DateOnly(2026, 10, 21), "PAYMENT - THANK YOU", 720.73m, true, null)], 0, null, null, null),
+            positiveIsSpend: true);
+        Assert.Equal("matched", preview.Rows.Single().Status);
+        Assert.Equal(onCard.Id, preview.Rows.Single().MatchId);
+
+        // Undoing the bank import takes it off the card again.
+        await _accounts.UndoAsync(bank, result.BatchId);
+        Assert.Equal(-740.33m, await _accounts.BalanceAsync(yuu));
+    }
+
+    [Fact]
+    public async Task A_payment_already_on_the_card_is_not_logged_again()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var yuu = await AddCardAsync("DBS yuu Visa Card");
+        await _accounts.CommitAsync(yuu, [Line(21, "PAYMENT - THANK YOU", 720.73m, true)], [], null, null);
+        await _accounts.CommitAsync(bank, [Line(20, "BILL DBSC-4119110004783939 : I-BANK", 720.73m, false)], [], null, null);
+
+        Assert.Equal(1, await _db.Transactions.CountAsync(t => t.AccountId == yuu.Id));
+        Assert.Equal(720.73m, await _accounts.BalanceAsync(yuu));
+    }
+
+    [Fact]
+    public async Task A_bill_payment_already_in_the_app_can_be_logged_on_its_card_by_hand()
+    {
+        var bank = await AddAccountAsync(5000m, 1);
+        var yuu = await AddCardAsync("DBS yuu Visa Card");
+        var paid = new Transaction { OccurredAtUtc = Local(20), Amount = 720.73m, Merchant = "FUNDS TRANSFER I-BANK", AccountId = bank.Id };
+        _db.Transactions.Add(paid);
+        await _db.SaveChangesAsync();
+        var payments = new CardPayments(_db, _clock);
+
+        Assert.Null(await payments.OnCardAsync(paid));
+        await payments.LogAsync(paid.Id, yuu.Id);
+
+        Assert.Equal(720.73m, await _accounts.BalanceAsync(yuu));
+        Assert.Equal(4279.27m, await _accounts.BalanceAsync(bank));
+        Assert.Equal("Transfer", (await _db.Transactions.Include(t => t.Category).SingleAsync(t => t.Id == paid.Id)).Category?.Name);
+        Assert.Equal(0m, (await _budgets.SummaryAsync(new DateOnly(2026, 10, 20))).TotalSpent);
+
+        var again = await Assert.ThrowsAsync<CardPaymentException>(() => payments.LogAsync(paid.Id, yuu.Id));
+        Assert.StartsWith("Already on DBS yuu Visa Card", again.Message);
+        await Assert.ThrowsAsync<CardPaymentException>(() => payments.LogAsync(paid.Id, bank.Id)); // not a card
     }
 
     [Fact]
