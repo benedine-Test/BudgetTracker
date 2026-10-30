@@ -94,7 +94,7 @@ public class TransactionService(BudgetDbContext db, Categorizer categorizer, Bud
         {
             dup.MergedSources = string.IsNullOrEmpty(dup.MergedSources) ? source.ToString() : $"{dup.MergedSources},{source}";
             dup.CardName ??= cardName;
-            if (string.IsNullOrWhiteSpace(dup.Merchant)) dup.Merchant = merchant;
+            if (MerchantText.IsUnknown(dup.Merchant) && !MerchantText.IsUnknown(merchant)) dup.Merchant = merchant;
             await LinkByCardAsync(dup, ct);
             await db.SaveChangesAsync(ct);
             await LoadRefsAsync(dup, ct);

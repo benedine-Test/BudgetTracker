@@ -38,14 +38,18 @@ public static partial class MerchantText
     /// <summary>Loose match used for de-duplication across sources.</summary>
     public static bool LooksLikeSameMerchant(string? a, string? b)
     {
-        var na = Normalize(a);
-        var nb = Normalize(b);
+        var na = IsUnknown(a) ? "" : Normalize(a);
+        var nb = IsUnknown(b) ? "" : Normalize(b);
         if (na.Length == 0 || nb.Length == 0) return true; // one source didn't give a merchant
         if (na.Contains(nb) || nb.Contains(na)) return true;
 
         var ta = na.Split(' ').Where(t => t.Length >= 4).ToHashSet();
         return nb.Split(' ').Any(t => t.Length >= 4 && ta.Contains(t));
     }
+
+    /// <summary>Blank, or the "Unknown merchant" placeholder saved when a source didn't say.</summary>
+    public static bool IsUnknown(string? merchant) =>
+        string.IsNullOrWhiteSpace(merchant) || merchant.Trim().Equals(NotificationParser.UnknownMerchant, StringComparison.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> TransitWords =
         ["BUS", "MRT", "LRT", "SIMPLYGO", "TRANSITLINK", "SMRT", "SBS", "EZ-LINK", "EZLINK"];

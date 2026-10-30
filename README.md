@@ -1,6 +1,6 @@
 # Budget Tracker — API (v0.1)
 
-Backend for a personal budget tracker: Apple Pay taps and bank card alerts come in automatically, a salary credit opens a 50/30/20 budget for the pay period, and investments are tracked alongside.
+Backend for a personal budget tracker: Apple Pay taps, Android payment notifications and bank card alerts come in automatically, a salary credit opens a 50/30/20 budget for the pay period, and investments are tracked alongside.
 
 **Stack:** ASP.NET Core 8 minimal API · EF Core · SQLite locally / SQL Server when deployed · xUnit.
 
@@ -49,11 +49,12 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 |---|---|---|
 | Apple Pay tap (iPhone Shortcut) | `POST /api/ingest/apple-pay` | ✅ ready |
 | Bank card alert email (parsed elsewhere) | `POST /api/ingest/card-alert` | ✅ endpoint ready — parsers depend on your banks |
+| Android notification (Google Wallet or bank app, via MacroDroid) | `POST /api/ingest/android` | 🧪 ready — wording guessed, tune on real notifications |
 | Manual entry | `POST /api/transactions` | ✅ ready |
 | Salary / other income | `POST /api/income` | ✅ ready |
 | Statement import (PDF, CSV or Excel) | `POST /api/accounts/{id}/import[/preview]` | ✅ ready — any bank; PDF needs a real (not scanned) statement |
 
-**De-duplication.** If the Shortcut and a bank email both report the same purchase (same amount + currency, within 30 min, similar merchant), the second one is merged, not doubled. Two identical taps from the *same* source are kept as two — two coffees are two coffees.
+**De-duplication.** If the Shortcut, a bank email or an Android notification both report the same purchase (same amount + currency, within 30 min, similar merchant), the second one is merged, not doubled. Two identical taps from the *same* source are kept as two — two coffees are two coffees.
 
 **Pay periods, not calendar months.** A budget runs from payday to the next payday (`payDay` setting, default 25th).
 - Salary that lands up to 7 days early (e.g. Friday before a Sunday payday) starts the new cycle that day, and the old cycle is shortened so no day is double-counted.
@@ -135,6 +136,29 @@ Things to check in your first week:
 - **Bus / MRT:** a transit tap has no fare yet (SimplyGo charges it later, usually as one `BUS/MRT` charge per day). A tap with a S$0 or blank amount is saved as *Fare pending* and doesn't count toward the budget. When the real `BUS/MRT` charge arrives (bank alert or added by hand), the pending trips from the 3 days before it are removed, so the charge is the only entry that costs money.
 - **Offline:** if the request fails, nothing is saved. Add an `If` on the result and fall back to **Append to Note** so you can enter it later.
 
+## Android phone (notification capture)
+
+Android has no "when I tap" automation like the iPhone, so the phone forwards payment **notifications** and the server reads them. The phone sends the raw text; all the parsing is on the server, so when a bank changes its wording only the server needs fixing.
+
+1. Install **MacroDroid**. Give it notification access, and in Android settings turn **battery optimisation off** for it (Samsung/Xiaomi otherwise stop it in the background, and taps are missed without a word).
+2. **Trigger:** Notification → *Notification Received* → pick the apps: **Google Wallet**, and your bank apps (**UOB TMRW**, **DBS digibank**…). Text: *Any*.
+3. **Action:** Connectivity → *HTTP Request*:
+   - Method `POST`, URL `https://<your-host>/api/ingest/android`
+   - Header `X-Api-Key` = your key
+   - Body, content type `application/json`:
+     ```json
+     {"app": "[not_app_name]", "title": "[not_title]", "text": "[notification]"}
+     ```
+   - Save the response to a string variable (e.g. `reply`).
+4. Optional while testing: **Action** → *Display Notification* with `{v=reply}`.
+
+`date` can be left out: the notification's arrival time is used. Notifications that aren't a purchase (promos, OTPs, declined, refunds) come back as `ignored: true` and save nothing.
+
+Things to check in your first week:
+- Send one real notification from each app through. If one is saved as *Unknown merchant* or ignored when it shouldn't be, the parser (`NotificationParser.cs`) needs that bank's wording added.
+- **Bank app alerts cover every use of the card**, including Apple Pay on the iPhone and the plastic card. Those are merged with the iPhone tap when the amount matches within 30 min and the shop looks the same, so they aren't counted twice, but check the first few.
+- Taps are filed under an account when its **card names** include the card's last four digits (e.g. `UOB One, 1234`). The card is saved as the app name plus those digits, e.g. `UOB TMRW 1234`.
+
 ## API reference
 
 | Method | Path | Purpose |
@@ -142,6 +166,7 @@ Things to check in your first week:
 | GET | `/health` | Liveness (no key) |
 | POST | `/api/ingest/apple-pay` | `{amount, merchant, card, date}` all strings → `{message, duplicate, transaction}` |
 | POST | `/api/ingest/card-alert` | Same shape, for parsed bank emails |
+| POST | `/api/ingest/android` | `{app, title, text, date?}` raw notification → `{message, ignored, duplicate, transaction?}` |
 | POST | `/api/income` | `{amount, date, note, kind: "salary"\|"other"\|"refund", cpf?}` — salary opens/tops up the period; `cpf` is added to the CPF holdings |
 | GET/PUT | `/api/profile` | `{birthDate: "yyyy-MM-dd" \| null}` — sets the CPF age band for salaries |
 | GET | `/api/budget/summary?date=yyyy-MM-dd` | Buckets (budget / spent / remaining / % / status / daily allowance), top categories, uncategorised |

@@ -15,7 +15,8 @@ public enum TransactionSource
     Manual = 0,
     ApplePayShortcut = 1,
     EmailAlert = 2,
-    StatementImport = 3
+    StatementImport = 3,
+    AndroidNotification = 4
 }
 
 public enum AccountKind

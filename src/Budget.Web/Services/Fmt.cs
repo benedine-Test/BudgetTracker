@@ -53,6 +53,7 @@ public static class Fmt
     {
         "ApplePayShortcut" => "Apple Pay",
         "EmailAlert" => "Bank alert",
+        "AndroidNotification" => "Android",
         "StatementImport" => "Statement",
         _ => "Entered by hand"
     };

@@ -13,6 +13,9 @@ namespace Budget.Api.Endpoints;
 /// </summary>
 public record ApplePayIngest(string? Amount, string? Merchant, string? Card, string? Date, string? Name);
 
+/// <summary>An Android notification forwarded as-is: the app's name, its title and text, when it arrived.</summary>
+public record AndroidIngest(string? App, string? Title, string? Text, string? Date);
+
 public record SpendCreate(decimal Amount, string Merchant, string? Currency, string? Date, int? CategoryId, string? Notes, string? Card, int? AccountId);
 // Kind: salary (default) | other | refund. Cpf: on a salary, the CPF paid on it (employee + employer), added to the CPF holdings.
 public record IncomeCreate(decimal Amount, string? Date, string? Note, string? Kind, int? AccountId, decimal? Cpf = null);
@@ -67,6 +70,22 @@ public static class TransactionEndpoints
         api.MapPost("/ingest/card-alert", (ApplePayIngest body, TransactionService svc, Clock clock,
             BudgetService budgets, CancellationToken ct) =>
             Ingest(body, TransactionSource.EmailAlert, svc, clock, budgets, ct));
+
+        // Called by MacroDroid/Tasker on an Android phone with each Google Wallet or bank app
+        // notification. Anything that isn't a purchase is answered with ignored = true, not an error,
+        // so the phone doesn't flag every promo.
+        api.MapPost("/ingest/android", async (AndroidIngest body, TransactionService svc, Clock clock,
+            BudgetService budgets, CancellationToken ct) =>
+        {
+            var settings = await budgets.GetSettingsAsync(ct);
+            var parsed = NotificationParser.Parse(body.App, body.Title, body.Text, settings.BaseCurrency);
+            if (parsed is null)
+                return Results.Ok(new { message = "Not a purchase. Nothing saved.", ignored = true, duplicate = false });
+
+            var result = await svc.IngestSpendAsync(parsed.Amount, parsed.Currency, parsed.Merchant, parsed.Card,
+                clock.ParseToUtc(body.Date), TransactionSource.AndroidNotification, null, ct);
+            return Results.Ok(new { message = result.Message, ignored = false, duplicate = result.WasDuplicate, transaction = ToDto(result.Transaction) });
+        });
 
         api.MapPost("/transactions", async (SpendCreate body, BudgetDbContext db, Categorizer cat, Clock clock,
             BudgetService budgets, TransactionService svc, CancellationToken ct) =>
@@ -341,7 +360,7 @@ public static class TransactionEndpoints
     private static async Task<IResult> Ingest(ApplePayIngest body, TransactionSource source,
         TransactionService svc, Clock clock, BudgetService budgets, CancellationToken ct)
     {
-        var merchant = FirstNonBlank(body.Merchant, body.Name) ?? "Unknown merchant";
+        var merchant = FirstNonBlank(body.Merchant, body.Name) ?? NotificationParser.UnknownMerchant;
 
         // Bus/MRT taps report S$0 (or nothing): the fare is worked out after the trip and
         // charged later. Keep the trip rather than reject it. Bank alerts with S$0 are noise.
