@@ -1,4 +1,4 @@
-﻿using Budget.Api.Services;
+using Budget.Api.Services;
 using Budget.Web.Services;
 
 namespace Budget.Tests;
