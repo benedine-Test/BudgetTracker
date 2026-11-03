@@ -1,5 +1,6 @@
 using Budget.Api.Data;
 using Microsoft.EntityFrameworkCore;
+using Payslip = Budget.Web.Services.Payslip;
 
 namespace Budget.Api.Services;
 
@@ -297,13 +298,21 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         var cards = account.Kind == AccountKind.CreditCard ? []
             : await db.Accounts.AsNoTracking().Where(a => a.Kind == AccountKind.CreditCard && !a.IsArchived).ToListAsync(ct);
         var settings = await budgets.GetSettingsAsync(ct);
+        // A salary from the bank is take-home pay. With a birth date and a CPF holding, work back to
+        // base pay and add the CPF paid on it, as recording it from base pay would.
+        var addCpf = settings.BirthDate is not null
+                     && await db.Holdings.AnyAsync(h => h.AssetClass == AssetClass.Cpf, ct);
+        var cpfAdded = 0m;
         foreach (var r in add.OrderBy(r => r.Date))
         {
             var when = RowTimeUtc(r.Date);
             var description = r.Description.Trim();
             if (r.IsCredit && r.IsSalary)
             {
-                var (salaryTx, _) = await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id, TransactionSource.StatementImport, ct: ct);
+                var cpf = addCpf ? SalaryCpf(r.Amount, settings.BirthDate!.Value, r.Date) : 0m;
+                var (salaryTx, _) = await budgets.RecordSalaryAsync(r.Amount, when, description, account.Id,
+                    TransactionSource.StatementImport, cpfContribution: cpf, ct: ct);
+                cpfAdded += salaryTx.CpfContribution ?? 0m;
                 salaryTx.ImportBatchId = batch.Id;
                 await db.SaveChangesAsync(ct);
                 salaries++;
@@ -368,7 +377,9 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         var parts = new List<string>();
         parts.Add(added == 0 ? "Nothing was missing" : $"Added {added} missing {(added == 1 ? "entry" : "entries")}");
         if (linked > 0) parts.Add($"filed {linked} existing under {account.Name}");
-        if (salaries > 0) parts.Add("salary recorded");
+        if (salaries > 0) parts.Add(cpfAdded > 0
+            ? $"salary recorded with {TransactionService.Money(cpfAdded, settings.BaseCurrency)} added to CPF"
+            : "salary recorded");
         foreach (var paidCard in paidCards.Distinct())
         {
             var n = paidCards.Count(c => c == paidCard);
@@ -376,6 +387,16 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
         }
         return new ImportResult(added, linked, salaries, balance,
             $"{string.Join(", ", parts)}. Balance now {TransactionService.Money(balance, account.Currency)}.", batch.Id);
+    }
+
+    /// <summary>
+    /// The CPF (employee and employer) on a salary that landed as <paramref name="takeHome"/>,
+    /// at the rates for the pay month's age band. Base pay is worked back from take-home pay.
+    /// </summary>
+    public static decimal SalaryCpf(decimal takeHome, DateOnly birthDate, DateOnly payDate)
+    {
+        var band = Payslip.AgeBandOn(birthDate, payDate);
+        return Payslip.TotalCpf(Payslip.BasePayFromTakeHome(takeHome, band), band);
     }
 
     public async Task<IReadOnlyList<ImportBatchView>> ImportsAsync(int accountId, CancellationToken ct = default)

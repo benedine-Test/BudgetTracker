@@ -379,6 +379,27 @@ public sealed class StatementImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Imported_salary_adds_cpf_once_birth_date_and_a_cpf_holding_are_set()
+    {
+        var a = await AddAccountAsync(0m, 20);
+        var row = new ImportRowIn(new DateOnly(2026, 10, 25), "SALARY ACME", 3200m, true, true);
+
+        // No birth date yet: salary only.
+        await _accounts.CommitAsync(a, [row], [], null, null);
+        Assert.Null((await _db.Transactions.SingleAsync()).CpfContribution);
+
+        var settings = await _db.Settings.SingleAsync();
+        settings.BirthDate = new DateOnly(1990, 5, 1);
+        _db.Holdings.Add(new Holding { Symbol = "CPF", Name = "CPF OA", AssetClass = AssetClass.Cpf, Units = 1, AverageCost = 10000m });
+        await _db.SaveChangesAsync();
+
+        var result = await _accounts.CommitAsync(a, [row with { Date = new DateOnly(2026, 11, 25) }], [], null, null);
+        var salary = await _db.Transactions.OrderBy(t => t.Id).LastAsync();
+        Assert.Equal(1480m, salary.CpfContribution);   // S$4,000 base: 20% + 17%
+        Assert.Contains("added to CPF", result.Message);
+    }
+
+    [Fact]
     public async Task Undo_puts_everything_back_as_it_was()
     {
         var a = await AddAccountAsync(1000m, 1);

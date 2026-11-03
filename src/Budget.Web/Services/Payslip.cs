@@ -180,6 +180,25 @@ public static class Payslip
         return new(basePay, cpf, EmployeeRatePct(band), shg, basePay - cpf - shg, EmployerCpf(basePay, band));
     }
 
+    /// <summary>
+    /// Base pay worked back from the take-home pay that lands in the bank, so a salary imported
+    /// from a statement can carry its CPF. Ignores the SHG fund (a few dollars), so it can come out
+    /// slightly low. Solves base = takeHome + employee CPF(base); the CPF share grows slower than the
+    /// pay, so repeating it settles on the answer in a few steps.
+    /// </summary>
+    public static decimal BasePayFromTakeHome(decimal takeHome, CpfAgeBand band)
+    {
+        if (takeHome <= 0) return 0m;
+        var basePay = takeHome;
+        for (var i = 0; i < 60; i++)
+        {
+            var next = takeHome + EmployeeCpf(basePay, band);
+            if (next == basePay) break;
+            basePay = next;
+        }
+        return basePay;
+    }
+
     public static string ShgName(ShgFund fund) => fund switch
     {
         ShgFund.Cdac => "CDAC",
