@@ -41,7 +41,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 
 On Android, long-press the app icon for **Add spending** / **Add income**; they open the app at `/?add=spend` and `/?add=income`.
 
-There is no offline mode: the app needs a connection, and on the free Azure plan the first load after a quiet spell can take about 20 seconds.
+There is no offline mode: the app needs a connection, and on the free Azure plan the first load after a quiet spell can take about 20 seconds (see *Keeping the free site awake*).
 
 ## How the pieces fit
 
@@ -116,7 +116,9 @@ Nothing to set up: the app looks through the last 25 months of spending for the 
 Needs the API deployed on **HTTPS** first (see below).
 
 1. **Shortcuts → Automation → New Automation → Transaction.** Pick your cards, choose **When I tap**, set **Run Immediately**.
-2. Add **Get Contents of URL**:
+2. **Log the tap first.** Add **Append to Note**, note `Budget taps` (create it once in Notes), text:
+   `⏳ ` + Current Date + ` · ` + Amount + ` · ` + Merchant + ` · ` + Card or Pass
+3. Add **Get Contents of URL**:
    - URL: `https://<your-host>/api/ingest/apple-pay`
    - Method: `POST`
    - Headers: `X-Api-Key` = your key
@@ -125,8 +127,9 @@ Needs the API deployed on **HTTPS** first (see below).
      - `merchant` → Merchant
      - `card` → Card or Pass
      - `date` → Current Date, formatted **ISO 8601**
-3. Add **Get Dictionary Value** → key `message` from *Contents of URL*.
-4. Add **Show Notification** → the dictionary value.
+4. Add **Get Dictionary Value** → key `message` from *Contents of URL*.
+5. **Mark it saved.** Add **Append to Note**, note `Budget taps`, text `   ✅ saved`.
+6. Add **Show Notification** → the dictionary value.
 
 You'll get a line like: *S$7.80 at Starbucks → Dining & Food Delivery. Wants left: S$1,492.20 (25d, ~S$59.69/day).*
 
@@ -134,7 +137,8 @@ Things to check in your first week:
 - The input field names above are from memory of the iOS 17/18 Transaction trigger. If yours differ, pick the closest ones. Amount is parsed leniently ("S$12.50", "12.50", "SGD 12,50" all work).
 - Whether the automation fires for **online / in-app** Apple Pay, not just in-store taps. Anything it misses gets caught by bank emails.
 - **Bus / MRT:** a transit tap has no fare yet (SimplyGo charges it later, usually as one `BUS/MRT` charge per day). A tap with a S$0 or blank amount is saved as *Fare pending* and doesn't count toward the budget. When the real `BUS/MRT` charge arrives (bank alert or added by hand), the pending trips from the 3 days before it are removed, so the charge is the only entry that costs money.
-- **Offline:** if the request fails, nothing is saved. Add an `If` on the result and fall back to **Append to Note** so you can enter it later.
+- **When a tap doesn't reach the server** (no signal, or the site was asleep), the automation stops at *Get Contents of URL* with an error such as `kCFErrorDomainCFNetwork error -1001` (timed out). Shortcuts can't catch that error, so an `If` after the request never runs. That's why the tap is logged to the note **before** the request: any `⏳` line in `Budget taps` without a `✅ saved` under it was **not** saved. Add those in the app (or let the bank alert / statement import pick them up), then clear the note now and then.
+- **Keep the site awake** (see *Keeping the free site awake* below), or most taps after a quiet spell will time out.
 
 ## Android phone (notification capture)
 
@@ -230,6 +234,19 @@ Things to check in your first week:
   - `Auth__ApiKey=...`
 - **Cheaper:** a small container host (Fly.io, Railway) keeping SQLite on a persistent volume.
 - Either way: HTTPS only, and keep the key out of source control.
+
+### Keeping the free site awake
+
+On the free Azure plan the site goes to sleep after about 20 quiet minutes, and the first request then takes ~20 seconds — longer than an Apple Pay automation waits. **Always On** fixes this but needs a paid plan (B1 or above). The free fix is an outside service that calls `/health` every 10 minutes:
+
+1. Sign up at [cron-job.org](https://cron-job.org) (free) → **Create cronjob**.
+2. URL: `https://<your-host>/health` — no key needed, and it doesn't touch the database.
+3. Schedule: **every 10 minutes**. Turn on *notify on failure* so you hear if the site goes down.
+4. Save, then check its history shows `200 OK`.
+
+[UptimeRobot](https://uptimerobot.com) works the same way (free HTTP monitor, 5-minute interval). The pings use almost none of the free plan's daily CPU allowance.
+
+The site still restarts after each publish and occasionally on Azure's side, so a rare timeout can still happen — the `Budget taps` note catches those.
 
 **Schema changes on a live database** go in `Data/SchemaUpgrade.cs` (checked, idempotent SQL for SQLite and SQL Server), since `EnsureCreated` never alters an existing database. Moving to EF migrations is still the long-term fix, but needs a baseline for databases created by `EnsureCreated` and separate migrations per provider.
 
