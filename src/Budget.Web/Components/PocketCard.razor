@@ -69,9 +69,9 @@
     [Parameter, EditorRequired] public PocketDto Pocket { get; set; } = default!;
     [Parameter] public EventCallback OnEdit { get; set; }
 
-    private string Tint => Pocket.Purpose == "Travel" ? "soft-peach" : Pocket.Locked ? "soft-lilac" : "soft-mint";
+    private string Tint => Pocket.Purpose != "SafetyFund" ? "soft-sky" : Pocket.Locked ? "soft-lilac" : "soft-mint";
 
-    private string Icon => Pocket.Purpose == "Travel" ? "✈️" : Pocket.Type == "Boost" ? (Pocket.Locked ? "🔒" : "🔓") : Pocket.Type == "Main" ? "🏦" : "🌿";
+    private string Icon => Pocket.Type == "Boost" ? (Pocket.Locked ? "🔒" : "🔓") : Pocket.Type == "Main" ? "🏦" : "🌿";
 
     private string TypeLabel => Pocket.Type switch
     {
