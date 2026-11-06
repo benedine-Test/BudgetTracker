@@ -51,7 +51,19 @@ public record SubscriptionsDto(decimal MonthlyTotal, decimal YearlyTotal, decima
 public record AskTurn(string Role, string Text);
 
 /// <param name="Looked">What the assistant checked to answer, shown under it.</param>
-public record AskAnswer(string Answer, List<string> Looked);
+/// <param name="Goals">Goals it suggests; saved only when the person taps Save.</param>
+public record AskAnswer(string Answer, List<string> Looked, List<GoalDraft>? Goals = null);
+
+/// <summary>Kind: "Limit" | "Save". A limit has a CategoryId, or a Bucket ("Needs" | "Wants").</summary>
+public record GoalDraft(string Kind, string? Name, int? CategoryId, string? Bucket, decimal Amount, string? Reason,
+    string? Category = null);
+
+public record GoalPeriod(DateOnly Start, DateOnly EndExclusive, decimal Amount, bool Hit);
+
+/// <summary>Status: Limit "ok" | "warning" | "over"; Save "ok" | "met".</summary>
+public record GoalProgress(int Id, string Kind, string Name, int? CategoryId, string? Category, string? Bucket,
+    decimal Amount, string? Reason, decimal SoFar, decimal PercentUsed, string Status, string Note, int DaysLeft,
+    List<GoalPeriod> Recent);
 
 public record AskStatus(bool Configured);
 
@@ -273,6 +285,22 @@ public class Api(HttpClient http)
 
     public Task<AskAnswer> Ask(string question, List<AskTurn> history) =>
         Post<AskAnswer>("api/ask", new { question, history });
+
+    // ---- Goals ----
+    public Task<List<GoalProgress>> Goals() => Get<List<GoalProgress>>("api/goals");
+
+    public Task<List<GoalProgress>> AddGoal(GoalDraft goal) => Post<List<GoalProgress>>("api/goals", goal);
+
+    public async Task<List<GoalProgress>> UpdateGoal(int id, decimal amount, string? name)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/goals/{id}", new { amount, name });
+        return (await r.Content.ReadFromJsonAsync<List<GoalProgress>>(Json))!;
+    }
+
+    public async Task DeleteGoal(int id)
+    {
+        using var _ = await Send(HttpMethod.Delete, $"api/goals/{id}");
+    }
 
     // ---- Subscriptions ----
     public Task<SubscriptionsDto> Subscriptions() => Get<SubscriptionsDto>("api/subscriptions");

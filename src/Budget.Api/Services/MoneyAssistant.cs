@@ -14,7 +14,8 @@ public record AskTurn(string Role, string Text);
 public record AskRequest(string Question, List<AskTurn>? History);
 
 /// <param name="Looked">What the assistant checked to answer ("This pay period's budget"), shown under the answer.</param>
-public record AskAnswer(string Answer, IReadOnlyList<string> Looked);
+/// <param name="Goals">Goals it suggests. Nothing is saved until the person taps Save on one.</param>
+public record AskAnswer(string Answer, IReadOnlyList<string> Looked, IReadOnlyList<GoalDraft>? Goals = null);
 
 /// <summary>Thrown for a problem the person should see as it is (no key set, the AI service is down).</summary>
 public class AskException(string message, int status = 503) : Exception(message)
@@ -28,7 +29,7 @@ public class AskException(string message, int status = 503) : Exception(message)
 /// investments. Nothing here can change data.
 /// </summary>
 public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountService accounts,
-    Subscriptions subscriptions, Clock clock, IConfiguration config, ILogger<MoneyAssistant> log)
+    Subscriptions subscriptions, GoalService goals, Clock clock, IConfiguration config, ILogger<MoneyAssistant> log)
 {
     public const string Model = "claude-opus-5-5";
     /// <summary>Tool rounds per question. A question needs two or three; this stops a runaway loop.</summary>
@@ -67,8 +68,18 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
           explanation. Keep it brief: it is read on a phone. Write plain text: short paragraphs, or lines
           starting with "- " for a list. No markdown (no **bold**, # headings or tables).
         - Say plainly when something is an estimate, and when the current pay period is not over yet.
-        - You can only read data. If they ask you to change something (record, move, delete), tell them
-          where in the app to do it.
+        - Goals: they may have saved goals (get_goals): a spending limit per pay period on a category or
+          bucket, or an amount to save per pay period. Mention how they're doing on any goal that matters
+          to the question.
+        - When they ask for goals, ways to cut spending, or how to afford something, suggest 1 to 3 goals
+          with suggest_goal, each built from their real numbers: start from what they actually spent in
+          that category over the last few finished pay periods, and set a cut they could keep (often 10 to
+          25 percent, never below their usual Needs). Prefer the categories where a cut frees the most
+          money. Say in the answer what each goal frees up per pay period and what that adds up to. Don't
+          suggest a goal they already have; suggest a new amount for it instead. Suggested goals appear
+          under your answer with a Save button; they're only saved if the person taps it.
+        - Apart from suggesting goals, you can only read data. If they ask you to change something
+          (record, move, delete), tell them where in the app to do it.
         - You give budgeting guidance, not regulated financial advice; for big decisions (loans,
           insurance, investing large sums) suggest they check with a licensed adviser.
         """;
@@ -113,6 +124,24 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                 ["kind"] = Prop("string", "'spend' for money out, 'income' for money in. Omit for both."),
                 ["limit"] = Prop("integer", "Most entries to list, 1-200. Default 50. The total covers every match."),
             }),
+        Tool("get_goals",
+            "The goals they've saved, each with this pay period's progress (spent or saved so far, status, " +
+            "what's left) and whether it was kept in the last three finished pay periods.",
+            new()),
+        Tool("suggest_goal",
+            "Suggest one goal, shown to the person under your answer with a Save button (it is not saved " +
+            "unless they tap it). Call once per goal. A 'limit' needs a category name, or a bucket for the " +
+            "whole of Needs or Wants. A 'save' goal counts what goes into Savings categories.",
+            new()
+            {
+                ["kind"] = Prop("string", "'limit' (spend at most amount per pay period) or 'save' (save at least amount)."),
+                ["category"] = Prop("string", "For a limit: the category name exactly as get_categories lists it."),
+                ["bucket"] = Prop("string", "For a limit on a whole bucket instead of a category: Needs or Wants."),
+                ["amount"] = Prop("number", "SGD per pay period."),
+                ["name"] = Prop("string", "Short label, e.g. 'Dining under S$300'."),
+                ["reason"] = Prop("string", "One line on why, in their words, e.g. 'Frees S$80 a month for Mum and Dad'."),
+            },
+            ["kind", "amount", "name"]),
         Tool("get_categories",
             "Every spending category and which bucket it counts in, plus the pay day and budget split settings.",
             new()),
@@ -149,6 +178,7 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
         });
 
         var looked = new List<string>();
+        var suggested = new List<GoalDraft>();
         for (var round = 0; round < MaxRounds; round++)
         {
             BetaMessage response;
@@ -179,7 +209,7 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
 
             if (response.StopReason == BetaStopReason.Refusal)
                 return new AskAnswer("Sorry, I can't help with that one. Try asking about your budget, spending, " +
-                                     "accounts or investments.", looked);
+                                     "accounts or investments.", looked, suggested);
 
             var assistant = new List<BetaContentBlockParam>();
             var results = new List<BetaContentBlockParam>();
@@ -202,8 +232,8 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                 else if (block.TryPickToolUse(out var use))
                 {
                     assistant.Add(new BetaToolUseBlockParam { ID = use.ID, Name = use.Name, Input = use.Input });
-                    var (output, label, failed) = await RunToolAsync(use.Name, use.Input, ct);
-                    if (!looked.Contains(label)) looked.Add(label);
+                    var (output, label, failed) = await RunToolAsync(use.Name, use.Input, suggested, ct);
+                    if (!failed && label.Length > 0 && !looked.Contains(label)) looked.Add(label);
                     results.Add(new BetaToolResultBlockParam { ToolUseID = use.ID, Content = output, IsError = failed });
                 }
             }
@@ -213,7 +243,7 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                 var answer = string.Join("\n\n", text).Trim();
                 if (response.StopReason == BetaStopReason.MaxTokens && answer.Length == 0)
                     answer = "That needed a longer answer than I can give here. Try asking something narrower.";
-                return new AskAnswer(answer.Length > 0 ? answer : "I couldn't work that out. Try rephrasing the question.", looked);
+                return new AskAnswer(answer.Length > 0 ? answer : "I couldn't work that out. Try rephrasing the question.", looked, suggested);
             }
 
             messages.Add(new BetaAssistantMessageParam { Content = assistant });
@@ -221,12 +251,16 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
         }
 
         return new AskAnswer("That took more looking up than I'm allowed for one question. " +
-                             "Try asking something more specific.", looked);
+                             "Try asking something more specific.", looked, suggested);
     }
 
-    /// <summary>Runs one read-only lookup. Returns JSON for Claude, a label for the person, and whether it failed.</summary>
+    /// <summary>
+    /// Runs one lookup. Returns JSON for Claude, a label for the person, and whether it failed.
+    /// The only tool that isn't a plain read, suggest_goal, adds to <paramref name="suggested"/> and saves nothing.
+    /// </summary>
     public async Task<(string Output, string Label, bool Failed)> RunToolAsync(
-        string name, IReadOnlyDictionary<string, JsonElement> input, CancellationToken ct = default)
+        string name, IReadOnlyDictionary<string, JsonElement> input, List<GoalDraft>? suggested = null,
+        CancellationToken ct = default)
     {
         try
         {
@@ -257,6 +291,10 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                 }
                 case "find_transactions":
                     return (Out(await FindAsync(input, ct)), "Spending entries", false);
+                case "get_goals":
+                    return (Out(await goals.ListAsync(ct)), "Your goals", false);
+                case "suggest_goal":
+                    return (await SuggestAsync(input, suggested), "", false); // not a lookup, so not listed as checked
                 case "get_categories":
                 {
                     var s = await budgets.GetSettingsAsync(ct);
@@ -273,6 +311,41 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
         {
             return (e.Message, name, true);
         }
+    }
+
+    private async Task<string> SuggestAsync(IReadOnlyDictionary<string, JsonElement> input, List<GoalDraft>? suggested)
+    {
+        if (suggested is { Count: >= 3 }) throw new ToolInputException("Three suggestions is the most per answer.");
+        var kind = Str(input, "kind")?.ToLowerInvariant() switch
+        {
+            "limit" => "Limit",
+            "save" => "Save",
+            _ => throw new ToolInputException("kind must be 'limit' or 'save'."),
+        };
+        var amount = input.TryGetValue("amount", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetDecimal()
+            : throw new ToolInputException("amount must be a number.");
+
+        int? categoryId = null;
+        string? categoryName = null;
+        if (kind == "Limit" && Str(input, "category") is { } catText)
+        {
+            var upper = catText.ToUpper();
+            var cat = await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Name.ToUpper() == upper)
+                      ?? throw new ToolInputException($"There's no category called '{catText}'. Check get_categories.");
+            (categoryId, categoryName) = (cat.Id, cat.Name);
+        }
+        var draft = new GoalDraft(kind, Str(input, "name"), categoryId, categoryId is null ? Str(input, "bucket") : null,
+            Math.Round(amount, 2), Str(input, "reason"), categoryName);
+        try
+        {
+            await goals.ValidateAsync(draft);
+        }
+        catch (GoalException e)
+        {
+            throw new ToolInputException(e.Message);
+        }
+        suggested?.Add(draft);
+        return "Shown to them with a Save button. Not saved unless they tap it.";
     }
 
     private async Task<object> FindAsync(IReadOnlyDictionary<string, JsonElement> input, CancellationToken ct)
@@ -362,11 +435,12 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
             ? d : throw new ToolInputException($"{key} must be a date like 2026-01-31.");
     }
 
-    private static BetaTool Tool(string name, string description, Dictionary<string, JsonElement> properties) => new()
+    private static BetaTool Tool(string name, string description, Dictionary<string, JsonElement> properties,
+        List<string>? required = null) => new()
     {
         Name = name,
         Description = description,
-        InputSchema = new() { Properties = properties },
+        InputSchema = new() { Properties = properties, Required = required },
     };
 
     private static JsonElement Prop(string type, string description) =>

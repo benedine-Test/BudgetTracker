@@ -136,6 +136,38 @@ else
         }
     </section>
 
+    @if (IsCurrent && goals is not null)
+    {
+        <section class="card">
+            <h2>Goals</h2>
+            @if (goals.Count == 0)
+            {
+                <a class="row" href="goals">
+                    <span class="row-main">
+                        <span>Set a goal to steer your spending</span>
+                        <span class="muted">Get ideas from your own numbers, or add one yourself</span>
+                    </span>
+                </a>
+            }
+            else
+            {
+                @foreach (var g in goals)
+                {
+                    <a class="cat-row goal-row @Goals.GoalClass(g)" href="goals">
+                        <div class="cat-head">
+                            <span>@g.Name</span>
+                            <span class="num @(g.Status == "over" ? "neg" : "")">@Fmt.Money(g.SoFar) / @Fmt.Money(g.Amount)</span>
+                        </div>
+                        <div class="bar thin" aria-hidden="true">
+                            <span class="@(g.Status == "over" ? "over" : "")" style="width:@Goals.Width(g.PercentUsed)"></span>
+                        </div>
+                        <span class="muted small">@g.Note</span>
+                    </a>
+                }
+            }
+        </section>
+    }
+
     @if (s.TopCategories.Count > 0)
     {
         var max = s.TopCategories.Max(c => c.Total);
@@ -197,6 +229,7 @@ else
     private List<BudgetSummary> history = [];
     private List<CardStatementDto> statements = [];
     private SubscriptionsDto? subs;
+    private List<GoalProgress>? goals;
     private DateOnly? date;
     private string? error;
     private bool showIncome;
@@ -236,6 +269,8 @@ else
         catch (ApiException) { statements = []; /* the budget works without it */ }
         try { subs = await Api.Subscriptions(); }
         catch (ApiException) { subs = null; }
+        try { goals = await Api.Goals(); }
+        catch (ApiException) { goals = null; }
     }
 
     private Task Go(DateOnly day)

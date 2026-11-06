@@ -1,5 +1,7 @@
 @page "/ask"
 @inject Api Api
+@inject Toast Toast
+@inject NavigationManager Nav
 
 <PageTitle>Ask</PageTitle>
 
@@ -34,7 +36,8 @@ else
                     <button type="button" class="chip" disabled="@busy" @onclick="() => Send(s)">@s</button>
                 }
             </div>
-            <p class="hint">It reads your budget, spending, accounts, subscriptions and investments to answer. It can't change anything.
+            <p class="hint">It reads your budget, spending, accounts, subscriptions, investments and goals to answer.
+                It can suggest goals, but only saves one when you tap Save.
                 Your question and the figures it looks at are sent to Anthropic's AI service.</p>
         </section>
     }
@@ -49,6 +52,31 @@ else
                     <div class="bubble-meta">Checked: @string.Join(" · ", looked)</div>
                 }
             </div>
+            @if (t.Goals is { Count: > 0 } goals)
+            {
+                @foreach (var g in goals)
+                {
+                    <div class="goal-idea @(g.Kind == "Save" ? "savings" : "")">
+                        <div class="goal-idea-main">
+                            <span class="goal-idea-kind">@(g.Kind == "Save" ? "Save" : "Limit") · per pay period</span>
+                            <strong>@(g.Name ?? Target(g))</strong>
+                            <span>@(g.Kind == "Save" ? "Put in at least" : $"{Target(g)}: at most") @Fmt.Money(g.Amount)</span>
+                            @if (!string.IsNullOrWhiteSpace(g.Reason))
+                            {
+                                <span class="muted small">@g.Reason</span>
+                            }
+                        </div>
+                        @if (saved.Contains(g))
+                        {
+                            <a class="btn small nowrap" href="goals">Saved ✓</a>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn small primary nowrap" disabled="@saving" @onclick="() => Save(g)">Save goal</button>
+                        }
+                    </div>
+                }
+            }
         }
         @if (busy)
         {
@@ -65,20 +93,27 @@ else
 }
 
 @code {
+    public const string GoalsQuestion = "Look at my spending and suggest goals to help me spend less and save more.";
+
     private static readonly string[] Suggestions =
     [
         "Can I send my parents $400 a month?",
+        GoalsQuestion,
         "Where did most of my money go this pay period?",
-        "How much do I spend on food delivery a month?",
-        "Am I on track with my savings?",
+        "How am I doing on my goals?",
     ];
 
-    private sealed record Turn(string Role, string Text, List<string>? Looked = null);
+    private sealed record Turn(string Role, string Text, List<string>? Looked = null, List<GoalDraft>? Goals = null);
 
     private readonly List<Turn> turns = [];
+    private readonly HashSet<GoalDraft> saved = [];
     private string draft = "";
     private bool busy;
+    private bool saving;
     private bool? configured;
+
+    /// <summary>A question to ask straight away, from links such as "Get ideas" on the Goals screen.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -90,6 +125,13 @@ else
         {
             configured = null; // Asking will show the real problem.
         }
+        if (!string.IsNullOrWhiteSpace(Q) && configured is not false)
+        {
+            var q = Q;
+            // Drop ?q= so a reload doesn't ask again.
+            Nav.NavigateTo(Nav.GetUriWithQueryParameter("q", (string?)null), replace: true);
+            await Send(q);
+        }
     }
 
     private async Task Send(string question)
@@ -97,7 +139,7 @@ else
         question = question.Trim();
         if (busy || question.Length == 0) return;
 
-        var history = turns.Where(t => !t.Role.StartsWith("error"))
+        var history = turns.Where(t => t.Role != "error")
             .Select(t => new AskTurn(t.Role, t.Text)).ToList();
         turns.Add(new Turn("user", question));
         draft = "";
@@ -105,7 +147,7 @@ else
         try
         {
             var a = await Api.Ask(question, history);
-            turns.Add(new Turn("assistant", a.Answer, a.Looked));
+            turns.Add(new Turn("assistant", a.Answer, a.Looked, a.Goals));
         }
         catch (ApiException e)
         {
@@ -117,9 +159,32 @@ else
         }
     }
 
+    private async Task Save(GoalDraft g)
+    {
+        if (saving) return;
+        saving = true;
+        try
+        {
+            await Api.AddGoal(g);
+            saved.Add(g);
+            Toast.Show("Goal saved. Track it on the Budget screen.");
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private static string Target(GoalDraft g) => g.Category ?? (g.Bucket is { } b ? $"All {b}" : "Savings");
+
     private void Clear()
     {
         turns.Clear();
+        saved.Clear();
         draft = "";
     }
 }

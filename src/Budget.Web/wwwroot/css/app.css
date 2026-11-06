@@ -414,4 +414,31 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 }
 .ask-box .btn { flex: none; }
 .ask-suggest .chip { flex: 0 1 auto; max-width: 100%; padding: 9px 14px; text-align: left; line-height: 1.3; }
-.topbar .btn.nowrap { white-space: nowrap; flex: none; }
+.btn.nowrap { white-space: nowrap; flex: none; }
+
+/* Suggested goal under an answer on Ask */
+.goal-idea {
+    align-self: flex-start; width: 88%; display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 14px; background: var(--surface);
+    border: 1px solid var(--line); border-left: 4px solid var(--wants);
+}
+.goal-idea.savings { border-left-color: var(--savings); }
+.goal-idea-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.goal-idea-kind { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+/* ---- Goals ---- */
+.goal-row { color: inherit; padding: 4px 0; }
+.goal-row .num.neg { color: var(--danger); font-weight: 600; }
+.goal-row.needs .bar > span, .goal.needs .bar > span { background: var(--needs); }
+.goal-row.wants .bar > span, .goal.wants .bar > span { background: var(--wants); }
+.goal-row.savings .bar > span, .goal.savings .bar > span { background: var(--savings); }
+.goal-row .bar > span.over, .goal .bar > span.over { background: var(--danger); }
+.goal-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); margin-top: 4px; }
+.goal-recent .dot {
+    display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+    font-size: 12px; font-weight: 700;
+}
+.goal-recent .dot.hit { background: color-mix(in srgb, var(--savings) 18%, transparent); color: var(--savings); }
+.goal-recent .dot.miss { background: var(--danger-bg); color: var(--danger); }
+.goal-actions, .goal-edit { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.goal-edit input { flex: 1 1 120px; width: auto; min-height: 38px; }

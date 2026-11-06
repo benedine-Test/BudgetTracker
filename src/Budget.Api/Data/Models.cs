@@ -304,3 +304,29 @@ public class DismissedRecurring
     public decimal Amount { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
+
+public enum GoalKind
+{
+    /// <summary>Spend at most Amount on a category (or a whole bucket) each pay period.</summary>
+    Limit = 0,
+    /// <summary>Put at least Amount into Savings each pay period.</summary>
+    Save = 1
+}
+
+/// <summary>
+/// A per-pay-period target the person chose, by hand or from a suggestion on the Ask screen.
+/// A Limit goal covers <see cref="CategoryId"/> when set, else the whole <see cref="Bucket"/>.
+/// </summary>
+public class Goal
+{
+    public int Id { get; set; }
+    public GoalKind Kind { get; set; }
+    public string Name { get; set; } = "";
+    public int? CategoryId { get; set; }
+    public Bucket? Bucket { get; set; }
+    /// <summary>The limit, or the amount to save, per pay period.</summary>
+    public decimal Amount { get; set; }
+    /// <summary>Why: "So I can send my parents $400 a month".</summary>
+    public string? Reason { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+}

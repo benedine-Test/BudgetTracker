@@ -1,0 +1,221 @@
+@page "/goals"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Goals</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Goals</h1>
+        <div class="sub"><a href="">‹ Budget</a></div>
+    </div>
+    <a class="btn small nowrap" href="@($"ask?q={Uri.EscapeDataString(Ask.GoalsQuestion)}")">Get ideas</a>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (goals is null)
+{
+    <Loading />
+}
+else
+{
+    @if (goals.Count == 0)
+    {
+        <section class="card empty">
+            <p>No goals yet. Tap <b>Get ideas</b> and the AI helper suggests a few from your own spending, or add one below.</p>
+        </section>
+    }
+
+    @foreach (var g in goals)
+    {
+        <section class="card goal @GoalClass(g)">
+            <div class="bucket-head">
+                <h2>@g.Name</h2>
+                <span class="num">@Fmt.Money(g.SoFar) of @Fmt.Money(g.Amount)</span>
+            </div>
+            <div class="bar" role="img" aria-label="@($"{Fmt.Percent(g.PercentUsed)} {(g.Kind == "Save" ? "saved" : "used")}")">
+                <span class="@(g.Status == "over" ? "over" : "")" style="width:@Width(g.PercentUsed)"></span>
+            </div>
+            <p class="bucket-foot @(g.Status == "over" ? "neg" : "")">
+                @g.Note@(g.Status == "warning" ? " · spending faster than the limit allows" : "")
+            </p>
+            <p class="muted small">@Describe(g)@(string.IsNullOrWhiteSpace(g.Reason) ? "" : $" · {g.Reason}")</p>
+            @if (g.Recent.Count > 0)
+            {
+                <p class="goal-recent small">
+                    Last @g.Recent.Count pay @(g.Recent.Count == 1 ? "period" : "periods"):
+                    @foreach (var r in g.Recent.AsEnumerable().Reverse())
+                    {
+                        <span class="dot @(r.Hit ? "hit" : "miss")" title="@($"{Fmt.Range(r.Start, r.EndExclusive)}: {Fmt.Money(r.Amount)}")">@(r.Hit ? "✓" : "✗")</span>
+                    }
+                    <span class="muted">@g.Recent.Count(r => r.Hit) of @g.Recent.Count kept</span>
+                </p>
+            }
+
+            @if (editing == g.Id)
+            {
+                <form class="goal-edit" @onsubmit="() => SaveEdit(g)" @onsubmit:preventDefault>
+                    <label for="ge-@g.Id" class="sr-only">New amount</label>
+                    <input id="ge-@g.Id" type="number" inputmode="decimal" min="1" step="1" @bind="editAmount" />
+                    <button type="submit" class="btn small primary" disabled="@busy">Save</button>
+                    <button type="button" class="btn small" @onclick="() => editing = null">Cancel</button>
+                </form>
+            }
+            else
+            {
+                <div class="goal-actions">
+                    <button type="button" class="btn small" @onclick="() => StartEdit(g)">Change amount</button>
+                    <button type="button" class="btn small danger" disabled="@busy" @onclick="() => Remove(g)">Remove</button>
+                </div>
+            }
+        </section>
+    }
+
+    <section class="card">
+        <h2>Add a goal</h2>
+        <form @onsubmit="Add" @onsubmit:preventDefault>
+            <label for="g-kind">Type</label>
+            <select id="g-kind" @bind="kind">
+                <option value="Limit">Spend at most…</option>
+                <option value="Save">Save at least…</option>
+            </select>
+
+            @if (kind == "Limit")
+            {
+                <label for="g-target">On</label>
+                <select id="g-target" @bind="target">
+                    <option value="">Choose…</option>
+                    <option value="bucket:Wants">All Wants</option>
+                    <option value="bucket:Needs">All Needs</option>
+                    @foreach (var c in categories.Where(c => !c.IsArchived && c.Bucket is "Needs" or "Wants").OrderBy(c => c.Name))
+                    {
+                        <option value="@c.Id">@c.Name (@c.Bucket)</option>
+                    }
+                </select>
+            }
+
+            <label for="g-amount">Amount each pay period (S$)</label>
+            <input id="g-amount" type="number" inputmode="decimal" min="1" step="1" @bind="amount" />
+
+            <label for="g-reason">Why (optional)</label>
+            <input id="g-reason" type="text" maxlength="300" placeholder="e.g. So I can send my parents $400 a month" @bind="reason" />
+
+            <button type="submit" class="btn primary block" disabled="@busy">Add goal</button>
+        </form>
+    </section>
+}
+
+@code {
+    private List<GoalProgress>? goals;
+    private List<CategoryDto> categories = [];
+    private string? error;
+    private bool busy;
+
+    private string kind = "Limit";
+    private string target = "";
+    private decimal? amount;
+    private string? reason;
+
+    private int? editing;
+    private decimal? editAmount;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            goals = await Api.Goals();
+            categories = await Api.Categories();
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private async Task Add()
+    {
+        if (busy) return;
+        if (amount is not > 0) { Toast.Error("Enter an amount."); return; }
+        if (kind == "Limit" && target.Length == 0) { Toast.Error("Choose what the limit is on."); return; }
+
+        int? categoryId = int.TryParse(target, out var id) ? id : null;
+        var bucket = target.StartsWith("bucket:") ? target["bucket:".Length..] : null;
+        busy = true;
+        try
+        {
+            goals = await Api.AddGoal(new GoalDraft(kind, null, kind == "Limit" ? categoryId : null,
+                kind == "Limit" ? bucket : null, amount.Value, reason));
+            (target, amount, reason) = ("", null, null);
+            Toast.Show("Goal added.");
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void StartEdit(GoalProgress g)
+    {
+        editing = g.Id;
+        editAmount = g.Amount;
+    }
+
+    private async Task SaveEdit(GoalProgress g)
+    {
+        if (busy || editAmount is not > 0) return;
+        busy = true;
+        try
+        {
+            goals = await Api.UpdateGoal(g.Id, editAmount.Value, null);
+            editing = null;
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task Remove(GoalProgress g)
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            await Api.DeleteGoal(g.Id);
+            goals?.Remove(g);
+            Toast.Show("Goal removed.");
+        }
+        catch (ApiException e)
+        {
+            Toast.Error(e.Message);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public static string GoalClass(GoalProgress g) =>
+        g.Kind == "Save" ? "savings" : Fmt.BucketClass(g.Bucket ?? "wants");
+
+    public static string Describe(GoalProgress g) => g.Kind == "Save"
+        ? "Save at least this each pay period"
+        : $"Limit on {(g.Category ?? $"all {g.Bucket}")} each pay period";
+
+    public static string Width(decimal pct) =>
+        $"{Math.Clamp(pct, 0, 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%";
+}

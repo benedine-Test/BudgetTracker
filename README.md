@@ -28,6 +28,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Subscriptions** (linked from Budget) — regular charges found in your spending, with what they cost a month and a year, when each is next due, price changes, and ones that look cancelled. See *Subscriptions* below.
 - **Total assets** (linked from Accounts and Invest) — bank and cash balances plus everything under Invest in one figure, with the mix, every item, and net worth after what's owed on cards.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
+- **Goals** (linked from Budget) — spending limits per pay period on a category or a whole bucket, and amounts to save. Each shows how this pay period is going and whether it was kept in the last three. **Get ideas** asks the AI helper to suggest goals from your own spending; tap **Save goal** on the ones you want.
 - **Ask** — type a question about your money ("Can I send my parents $400 a month?") and get an answer worked out from your own data. See *Ask (AI helper)* below.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
@@ -46,11 +47,12 @@ There is no offline mode: the app needs a connection, and on the free Azure plan
 
 ## Ask (AI helper)
 
-The **Ask** tab sends your question to Claude (Anthropic's AI) with a set of **read-only** lookups: this and earlier pay periods' budgets, spending entries (search by date, shop, category or bucket), account balances, subscriptions, investments and categories. Claude picks what it needs, the server runs those lookups on your data, and the answer comes back with a "Checked: …" line listing what it looked at. It can't add, change or delete anything.
+The **Ask** tab sends your question to Claude (Anthropic's AI) with a set of **read-only** lookups: this and earlier pay periods' budgets, spending entries (search by date, shop, category or bucket), account balances, subscriptions, investments and categories. Claude picks what it needs, the server runs those lookups on your data, and the answer comes back with a "Checked: …" line listing what it looked at. It can't add, change or delete anything. It can *suggest* goals, shown under the answer with a **Save goal** button; nothing is saved until you tap it. It also reads your saved goals, so "how am I doing on my goals?" works.
 
 - **Turn it on:** create an API key at console.anthropic.com, then in Azure → the web app → *Environment variables*, add `Anthropic__ApiKey` = your key and restart. (Locally: `export Anthropic__ApiKey=...`.) Without a key the tab says it isn't set up; the rest of the app is unaffected.
 - **Privacy:** your question and the figures each lookup returns are sent to Anthropic's API. Chats are kept only on the open screen; nothing is saved in the app's database.
 - **Cost:** you pay Anthropic per question (usually a few cents; more for questions that need many lookups). Each question is capped at 8 lookup rounds.
+- Goal endpoints: `GET/POST /api/goals`, `PUT/DELETE /api/goals/{id}`.
 - Endpoints: `GET /api/ask/status`, `POST /api/ask` with `{ "question": "...", "history": [{ "role": "user"|"assistant", "text": "..." }] }`.
 
 ## How the pieces fit

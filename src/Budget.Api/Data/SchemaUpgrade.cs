@@ -307,6 +307,37 @@ public static class SchemaUpgrade
                     ? "CREATE INDEX [IX_DismissedRecurring_Pattern] ON [DismissedRecurring] ([Pattern]);"
                     : "CREATE INDEX \"IX_DismissedRecurring_Pattern\" ON \"DismissedRecurring\" (\"Pattern\");", ct);
             }
+
+            // ---- Spending and saving goals ----
+            if (!await TableExistsAsync(conn, "Goals", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [Goals] (
+                          [Id] int NOT NULL IDENTITY,
+                          [Kind] int NOT NULL,
+                          [Name] nvarchar(100) NOT NULL,
+                          [CategoryId] int NULL,
+                          [Bucket] int NULL,
+                          [Amount] decimal(18,2) NOT NULL,
+                          [Reason] nvarchar(300) NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_Goals] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "Goals" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_Goals" PRIMARY KEY AUTOINCREMENT,
+                          "Kind" INTEGER NOT NULL,
+                          "Name" TEXT NOT NULL,
+                          "CategoryId" INTEGER NULL,
+                          "Bucket" INTEGER NULL,
+                          "Amount" TEXT NOT NULL,
+                          "Reason" TEXT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+            }
         }
         finally
         {

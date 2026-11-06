@@ -15,6 +15,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<PolicyTerms> PolicyTerms => Set<PolicyTerms>();
     public DbSet<PolicyValuation> PolicyValuations => Set<PolicyValuation>();
     public DbSet<DismissedRecurring> DismissedRecurring => Set<DismissedRecurring>();
+    public DbSet<Goal> Goals => Set<Goal>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -100,6 +101,14 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(d => d.Pattern).HasMaxLength(100);
             e.Property(d => d.Amount).HasPrecision(18, 2);
             e.HasIndex(d => d.Pattern);
+        });
+
+        // Linked to a category by id only; a goal whose category is deleted shows as "category removed".
+        b.Entity<Goal>(e =>
+        {
+            e.Property(g => g.Name).HasMaxLength(100);
+            e.Property(g => g.Amount).HasPrecision(18, 2);
+            e.Property(g => g.Reason).HasMaxLength(300);
         });
     }
 }

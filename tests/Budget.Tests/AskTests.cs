@@ -16,6 +16,7 @@ public sealed class AskTests : IDisposable
     private readonly BudgetDbContext _db;
     private readonly BudgetService _budgets;
     private readonly MoneyAssistant _ai;
+    private readonly GoalService _goals;
     private readonly Clock _clock = new(new ConfigurationBuilder().Build());
     private readonly FakeClaude _claude = new();
 
@@ -31,7 +32,8 @@ public sealed class AskTests : IDisposable
         var accounts = new AccountService(_db, categorizer, _budgets, tx, _clock);
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Anthropic:ApiKey"] = "test-key" }).Build();
-        _ai = new MoneyAssistant(_db, _budgets, accounts, new Subscriptions(_db, _clock), _clock, config,
+        _goals = new GoalService(_db, _budgets, _clock);
+        _ai = new MoneyAssistant(_db, _budgets, accounts, new Subscriptions(_db, _clock), _goals, _clock, config,
             NullLogger<MoneyAssistant>.Instance) { Http = new HttpClient(_claude) };
     }
 
@@ -121,7 +123,7 @@ public sealed class AskTests : IDisposable
         Assert.Equal("claude-opus-5-5", root.GetProperty("model").GetString());
         Assert.Equal("default", root.GetProperty("fallbacks").GetString());
         Assert.Equal("medium", root.GetProperty("output_config").GetProperty("effort").GetString());
-        Assert.Equal(7, root.GetProperty("tools").GetArrayLength());
+        Assert.Equal(9, root.GetProperty("tools").GetArrayLength());
         var msgs = root.GetProperty("messages");
         Assert.Equal(3, msgs.GetArrayLength());
         Assert.Contains("$400", msgs[2].GetProperty("content").ToString());
@@ -139,11 +141,137 @@ public sealed class AskTests : IDisposable
         var categorizer = new Categorizer(_db);
         var tx = new TransactionService(_db, categorizer, _budgets, _clock);
         var noKey = new MoneyAssistant(_db, _budgets, new AccountService(_db, categorizer, _budgets, tx, _clock),
-            new Subscriptions(_db, _clock), _clock, new ConfigurationBuilder().Build(), NullLogger<MoneyAssistant>.Instance);
+            new Subscriptions(_db, _clock), _goals, _clock, new ConfigurationBuilder().Build(), NullLogger<MoneyAssistant>.Instance);
 
         Assert.False(noKey.IsConfigured);
         var e = await Assert.ThrowsAsync<AskException>(() => noKey.AskAsync(new AskRequest("hi", null)));
         Assert.Contains("Anthropic__ApiKey", e.Message);
+    }
+
+    private Category Cat(Bucket bucket) => _db.Categories.First(c => c.Bucket == bucket && !c.IsArchived);
+
+    [Fact]
+    public async Task Suggest_goal_collects_a_draft_and_saves_nothing()
+    {
+        var dining = Cat(Bucket.Wants);
+        var suggested = new List<GoalDraft>();
+
+        var (output, label, failed) = await _ai.RunToolAsync("suggest_goal",
+            Input(new { kind = "limit", category = dining.Name.ToLower(), amount = 250, name = "Eat out less", reason = "For Mum" }),
+            suggested);
+
+        Assert.False(failed);
+        Assert.Equal("", label);
+        Assert.Contains("Not saved", output);
+        var d = Assert.Single(suggested);
+        Assert.Equal(("Limit", dining.Id, dining.Name, 250m), (d.Kind, d.CategoryId, d.Category, d.Amount));
+        Assert.Equal(0, await _db.Goals.CountAsync());
+    }
+
+    [Fact]
+    public async Task Suggest_goal_rejects_unknown_categories_and_income()
+    {
+        var suggested = new List<GoalDraft>();
+        var (output, _, failed) = await _ai.RunToolAsync("suggest_goal",
+            Input(new { kind = "limit", category = "Yachts", amount = 100, name = "x" }), suggested);
+        Assert.True(failed);
+        Assert.Contains("no category called", output);
+
+        (output, _, failed) = await _ai.RunToolAsync("suggest_goal",
+            Input(new { kind = "limit", category = "Salary", amount = 100, name = "x" }), suggested);
+        Assert.True(failed);
+        Assert.Contains("isn't spending", output);
+        Assert.Empty(suggested);
+    }
+
+    [Fact]
+    public async Task Ask_returns_suggested_goals_with_the_answer()
+    {
+        var wants = Cat(Bucket.Wants);
+        var toolInput = JsonSerializer.Serialize(new { kind = "limit", category = wants.Name, amount = 300, name = "Cap it" });
+        _claude.Replies.Enqueue("""
+            {"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5",
+             "content":[{"type":"tool_use","id":"tu_1","name":"suggest_goal","input":
+            """ + toolInput + """
+            }],
+             "stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}
+            """);
+        _claude.Replies.Enqueue("""
+            {"id":"msg_2","type":"message","role":"assistant","model":"claude-opus-5-5",
+             "content":[{"type":"text","text":"Try this."}],
+             "stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}
+            """);
+
+        var answer = await _ai.AskAsync(new AskRequest("Set me some goals", null));
+
+        Assert.Equal("Try this.", answer.Answer);
+        Assert.Equal(300m, Assert.Single(answer.Goals!).Amount);
+    }
+
+    [Fact]
+    public async Task Limit_goal_tracks_this_pay_period_and_the_last_ones()
+    {
+        var wants = Cat(Bucket.Wants);
+        // Two finished pay periods (salary on the 25th) and the current one.
+        var today = _clock.Today;
+        var (start, _) = PayPeriod.NominalFor(today, 25);
+        await _budgets.RecordSalaryAsync(4000m, _clock.LocalDateStartToUtc(start.AddMonths(-2)).AddHours(9), null);
+        await _budgets.RecordSalaryAsync(4000m, _clock.LocalDateStartToUtc(start.AddMonths(-1)).AddHours(9), null);
+        await _budgets.RecordSalaryAsync(4000m, _clock.LocalDateStartToUtc(start).AddHours(9), null);
+        async Task SpendOn(DateOnly day, decimal amount)
+        {
+            _db.Transactions.Add(new Transaction
+            {
+                OccurredAtUtc = _clock.LocalDateStartToUtc(day).AddHours(13), Amount = amount, Merchant = "CAFE",
+                CategoryId = wants.Id, Source = TransactionSource.Manual
+            });
+            await _db.SaveChangesAsync();
+        }
+        await SpendOn(start.AddMonths(-2).AddDays(3), 120m); // kept
+        await SpendOn(start.AddMonths(-1).AddDays(3), 260m); // missed
+        await SpendOn(today, 90m);                           // this period
+
+        await _goals.CreateAsync(new GoalDraft("Limit", null, wants.Id, null, 200m, "Save for the trip"));
+        var g = Assert.Single(await _goals.ListAsync());
+
+        Assert.Equal(wants.Name, g.Name);
+        Assert.Equal(90m, g.SoFar);
+        Assert.Contains("S$110.00 left", g.Note);
+        Assert.Equal([false, true], g.Recent.Select(r => r.Hit));      // newest first
+        Assert.Equal([260m, 120m], g.Recent.Select(r => r.Amount));
+    }
+
+    [Fact]
+    public async Task Save_goal_counts_the_savings_bucket_and_says_when_it_is_met()
+    {
+        await _budgets.RecordSalaryAsync(4000m, _clock.LocalDateStartToUtc(_clock.Today).AddHours(9), null);
+        await SpendAsync("TO SAVINGS", 500m, 0, Cat(Bucket.Savings).Name);
+        await _goals.CreateAsync(new GoalDraft("save", "Rainy day", null, null, 400m, null));
+
+        var g = Assert.Single(await _goals.ListAsync());
+        Assert.Equal(("Save", "met", 500m), (g.Kind, g.Status, g.SoFar));
+    }
+
+    [Fact]
+    public async Task Goal_validation_explains_what_is_wrong()
+    {
+        var e = await Assert.ThrowsAsync<GoalException>(() => _goals.CreateAsync(new GoalDraft("Limit", null, null, "Savings", 100m, null)));
+        Assert.Contains("Needs or Wants", e.Message);
+        e = await Assert.ThrowsAsync<GoalException>(() => _goals.CreateAsync(new GoalDraft("Limit", null, null, "Wants", 0m, null)));
+        Assert.Contains("more than zero", e.Message);
+        e = await Assert.ThrowsAsync<GoalException>(() => _goals.CreateAsync(new GoalDraft("Spree", null, null, "Wants", 10m, null)));
+        Assert.Contains("spending limit", e.Message);
+    }
+
+    [Fact]
+    public async Task Schema_upgrade_adds_the_goals_table_to_an_existing_database()
+    {
+        // A database from before goals: drop the table EnsureCreated made, then upgrade twice.
+        await _db.Database.ExecuteSqlRawAsync("DROP TABLE \"Goals\";");
+        await SchemaUpgrade.ApplyAsync(_db);
+        await SchemaUpgrade.ApplyAsync(_db);
+        await _goals.CreateAsync(new GoalDraft("Limit", null, null, "Wants", 500m, null));
+        Assert.Equal(1, await _db.Goals.CountAsync());
     }
 
     private sealed class FakeClaude : HttpMessageHandler
