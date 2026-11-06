@@ -16,7 +16,7 @@ public static class SavingsEndpoints
 {
     public static void MapSavingsEndpoints(this RouteGroupBuilder api)
     {
-        // The Safety Fund: target, ready vs locked, every pocket with its interest. Travel is listed apart.
+        // The Safety Fund: target, ready vs locked, every pocket with its interest. Other pockets are listed apart.
         api.MapGet("/savings", (SafetyFund svc, CancellationToken ct) => svc.ViewAsync(null, ct));
 
         api.MapPut("/savings/targets", (TargetsSave body, SafetyFund svc, CancellationToken ct) =>

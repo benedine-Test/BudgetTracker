@@ -87,19 +87,9 @@ else
         }
     }
 
-    <h2 class="group-title travel">Travel <span class="muted small">· not part of the Safety Fund</span></h2>
-    @if (f.Travel.Count == 0)
-    {
-        <section class="card empty"><p>No Travel pocket yet. Add one with <b>Add pocket</b> and choose “Travel”.</p></section>
-    }
-    @foreach (var p in f.Travel)
-    {
-        <PocketCard Pocket="p" OnEdit="() => OpenEditPocket(p)" />
-    }
-
     @if (f.Other.Count > 0)
     {
-        <h2 class="group-title">Other pockets</h2>
+        <h2 class="group-title">Other pockets <span class="muted small">· not part of the Safety Fund</span></h2>
         @foreach (var p in f.Other)
         {
             <PocketCard Pocket="p" OnEdit="() => OpenEditPocket(p)" />
@@ -113,7 +103,7 @@ else
         </div>
         @if (planned.Count == 0)
         {
-            <p class="muted">Plan a regular move, e.g. S$300 to the Safety fund pocket and S$100 to Travel. It shows under Savings on Budget each pay period, to tick off when done.</p>
+            <p class="muted">Plan a regular move, e.g. S$300 to the Safety fund pocket. It shows under Savings on Budget each pay period, to tick off when done.</p>
         }
         else
         {
@@ -168,8 +158,7 @@ else
             <label for="p-purpose">What it's for</label>
             <select id="p-purpose" @bind="pPurpose">
                 <option value="SafetyFund">Safety Fund</option>
-                <option value="Travel">Travel</option>
-                <option value="Other">Other (not counted)</option>
+                <option value="Other">Something else (not in the Safety Fund)</option>
             </select>
 
             <div class="two">
@@ -279,7 +268,7 @@ else
                 </div>
             </div>
             <label class="check small"><input type="checkbox" @bind="mAlreadySaved" /> Money I'd already saved (not from this pay)</label>
-            <p class="hint">Into a Safety Fund or Travel pocket from this pay counts as Savings in 50/30/20. Between pockets, or money already saved, is only moved. Needs and Wants are never touched.</p>
+            <p class="hint">Into a Safety Fund pocket from this pay counts as Savings in 50/30/20. Between pockets, or money already saved, is only moved. Needs and Wants are never touched.</p>
             <label for="m-note">Note (optional)</label>
             <input id="m-note" type="text" maxlength="200" @bind="mNote" />
             @if (formError is not null)

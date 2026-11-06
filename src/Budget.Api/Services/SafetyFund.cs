@@ -21,7 +21,7 @@ public record PocketView(
 public record SafetyFundView(
     string Currency, decimal EmergencyTarget, decimal? ParentsTarget, decimal Target,
     decimal Ready, decimal Locked, decimal Total, decimal PercentOfTarget,
-    List<PocketView> Safety, List<PocketView> Travel, List<PocketView> Other);
+    List<PocketView> Safety, List<PocketView> Other);
 
 /// <summary>Kind: "maturity" (a Boost Pocket's end date) | "repeat" (comes back once marked done).</summary>
 public record ReminderView(string Kind, string Text, DateOnly Due, int DaysLeft, bool Soon, int? ReminderId, int? AccountId);
@@ -91,8 +91,7 @@ public class SafetyFund(BudgetDbContext db, Clock clock, BudgetService budgets, 
 
         return new SafetyFundView(settings.BaseCurrency, settings.EmergencyTarget, settings.ParentsTarget, target,
             ready, locked, total, pct, safety,
-            active.Where(p => p.Purpose == nameof(PocketPurpose.Travel)).ToList(),
-            active.Where(p => p.Purpose == nameof(PocketPurpose.Other)).ToList());
+            active.Where(p => p.Purpose != nameof(PocketPurpose.SafetyFund)).ToList());
     }
 
     public async Task<List<PocketView>> PocketsAsync(DateOnly today, CancellationToken ct = default)

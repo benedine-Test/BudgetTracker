@@ -403,6 +403,11 @@ public static class SchemaUpgrade
                     : "CREATE UNIQUE INDEX \"IX_PocketTerms_AccountId\" ON \"PocketTerms\" (\"AccountId\");", ct);
             }
 
+            // Travel pockets (purpose 2) were removed: they become Other pockets. Runs every start; a no-op once done.
+            await db.Database.ExecuteSqlRawAsync(sqlServer
+                ? "UPDATE [PocketTerms] SET [Purpose] = 0 WHERE [Purpose] = 2;"
+                : "UPDATE \"PocketTerms\" SET \"Purpose\" = 0 WHERE \"Purpose\" = 2;", ct);
+
             if (!await TableExistsAsync(conn, "PlannedTransfers", sqlServer, ct))
             {
                 await db.Database.ExecuteSqlRawAsync(sqlServer

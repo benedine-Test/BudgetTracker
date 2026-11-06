@@ -16,8 +16,8 @@ public class TransferRuleTests
         Assert.Equal(Bucket.Savings, TransferRules.OutSide(null, Pocket(PocketPurpose.SafetyFund), alreadySaved: false));
 
     [Fact]
-    public void Pay_into_a_travel_pocket_is_savings() =>
-        Assert.Equal(Bucket.Savings, TransferRules.OutSide(null, Pocket(PocketPurpose.Travel), alreadySaved: false));
+    public void Pay_into_a_pocket_outside_the_safety_fund_is_only_moved() =>
+        Assert.Equal(Bucket.Transfer, TransferRules.OutSide(null, Pocket(PocketPurpose.Other), alreadySaved: false));
 
     [Fact]
     public void Money_already_saved_is_only_moved() =>
@@ -41,7 +41,7 @@ public class TransferRuleTests
 
     [Theory]
     [InlineData(PocketPurpose.SafetyFund, false, "Safety Fund")]
-    [InlineData(PocketPurpose.Travel, false, "Savings Goals")]
+    [InlineData(PocketPurpose.Other, false, "Transfer")]
     [InlineData(PocketPurpose.SafetyFund, true, "Transfer")]
     public void Files_the_money_out_side(PocketPurpose to, bool alreadySaved, string category) =>
         Assert.Equal(category, TransferRules.OutCategory(null, Pocket(to), alreadySaved));
@@ -216,24 +216,34 @@ public sealed class SavingsTransferTests : IDisposable
     }
 
     [Fact]
-    public async Task Travel_counts_as_savings_but_not_toward_the_safety_fund()
+    public async Task A_pocket_outside_the_safety_fund_is_not_savings_and_not_in_the_fund()
     {
         var uob = await BankAsync("UOB One", 20000m);
         await PayPeriodWithSpendingAsync(uob);
-        var travel = await _fund.AddPocketAsync(new PocketSave("Travel", "GXS Bank", PocketType.Saving, PocketPurpose.Travel, 1.2m,
+        var other = await _fund.AddPocketAsync(new PocketSave("Holiday", "GXS Bank", PocketType.Saving, PocketPurpose.Other, 1.2m,
             StartDate: Nov6, GoalAmount: 2000m), today: Nov6);
         var before = await BudgetAsync();
 
-        var (moneyOut, _) = await _transfers.RecordAsync(uob.Id, travel.AccountId, 100m, At(Payday.AddDays(1)), false, null);
+        var (moneyOut, _) = await _transfers.RecordAsync(uob.Id, other.AccountId, 100m, At(Payday.AddDays(1)), false, null);
 
-        var after = await BudgetAsync();
-        Assert.Equal(before.Savings + 100m, after.Savings);
-        Assert.Equal(before.Needs, after.Needs);
-        Assert.Equal(before.Wants, after.Wants);
-        Assert.Equal("Savings Goals", (await _db.Categories.FindAsync(moneyOut.CategoryId))!.Name);
+        Assert.Equal(before, await BudgetAsync());
+        Assert.Equal("Transfer", (await _db.Categories.FindAsync(moneyOut.CategoryId))!.Name);
         var view = await _fund.ViewAsync(Payday.AddDays(1));
         Assert.Equal(0m, view.Total);
-        Assert.Equal(100m, Assert.Single(view.Travel).Balance);
+        Assert.Equal(100m, Assert.Single(view.Other).Balance);
+    }
+
+    [Fact]
+    public async Task Upgrade_turns_old_travel_pockets_into_other_pockets()
+    {
+        var pocket = await PocketAsync("Travel", PocketType.Saving, PocketPurpose.SafetyFund, 1.2m);
+        // A pocket saved as Travel (purpose 2) before Travel pockets were removed.
+        await _db.Database.ExecuteSqlRawAsync($"UPDATE \"PocketTerms\" SET \"Purpose\" = 2 WHERE \"AccountId\" = {pocket.AccountId}");
+
+        await SchemaUpgrade.ApplyAsync(_db);
+
+        Assert.Equal(PocketPurpose.Other, (await _db.PocketTerms.AsNoTracking().SingleAsync()).Purpose);
+        Assert.Equal("Travel", Assert.Single((await _fund.ViewAsync(Nov6)).Other).Name);
     }
 
     [Fact]
@@ -259,10 +269,10 @@ public sealed class SavingsTransferTests : IDisposable
         var uob = await BankAsync("UOB One", 20000m);
         await PayPeriodWithSpendingAsync(uob);
         var safety = await PocketAsync("Safety fund", PocketType.Saving, PocketPurpose.SafetyFund, 1.2m);
-        var travel = await PocketAsync("Travel", PocketType.Saving, PocketPurpose.Travel, 1.2m);
+        var boost = await PocketAsync("Boost 2", PocketType.Boost, PocketPurpose.SafetyFund, 1.3m);
         var startsOn = new DateOnly(2026, 12, 1);
         var p1 = await _fund.SavePlannedAsync(null, new PlannedSave("Safety fund", 300m, uob.Id, safety.AccountId, startsOn));
-        await _fund.SavePlannedAsync(null, new PlannedSave("Travel", 100m, uob.Id, travel.AccountId, startsOn));
+        await _fund.SavePlannedAsync(null, new PlannedSave("Boost top-up", 100m, uob.Id, boost.AccountId, startsOn));
 
         // The November pay period started before the plans do.
         Assert.Empty((await _fund.ForPeriodAsync(new DateOnly(2026, 11, 26))).Items);

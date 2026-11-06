@@ -445,13 +445,12 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 
 /* ---- Safety Fund and savings pockets ---- */
 /* Soft pastel tints, mixed from the theme tokens so they follow light and dark mode. */
-:root { --ready: var(--savings); --locked: #7d6bd6; --travel: #e08a5c; --butter: #d9a520; --sky: #4a90c8; }
+:root { --ready: var(--savings); --locked: #7d6bd6; --butter: #d9a520; --sky: #4a90c8; }
 @media (prefers-color-scheme: dark) {
-    :root { --locked: #b3a6f5; --travel: #f2ad86; --butter: #f0cc6b; --sky: #8ec3ee; }
+    :root { --locked: #b3a6f5; --butter: #f0cc6b; --sky: #8ec3ee; }
 }
 .soft-mint { background: color-mix(in srgb, var(--ready) 9%, var(--surface)); }
 .soft-lilac { background: color-mix(in srgb, var(--locked) 10%, var(--surface)); }
-.soft-peach { background: color-mix(in srgb, var(--travel) 10%, var(--surface)); }
 .soft-butter { background: color-mix(in srgb, var(--butter) 12%, var(--surface)); }
 .soft-sky { background: color-mix(in srgb, var(--sky) 9%, var(--surface)); }
 .soft-link { background: color-mix(in srgb, var(--ready) 9%, var(--surface)); color: var(--text); box-shadow: var(--shadow); }
@@ -473,13 +472,12 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 .pocket .tag { margin-right: 4px; }
 .soft-mint-tag { background: color-mix(in srgb, var(--ready) 18%, transparent); color: var(--ready); }
 .soft-lilac-tag { background: color-mix(in srgb, var(--locked) 20%, transparent); color: var(--locked); }
-.soft-peach-tag { background: color-mix(in srgb, var(--travel) 20%, transparent); color: var(--travel); }
+.soft-sky-tag { background: color-mix(in srgb, var(--sky) 20%, transparent); color: var(--sky); }
 .pocket-when { font-size: 14px; }
 .soft-lilac .bar > span { background: var(--locked); }
-.soft-peach .bar > span { background: var(--travel); }
+.soft-sky .bar > span { background: var(--sky); }
 .soft-mint .bar > span { background: var(--ready); }
 .edit-link { align-self: flex-start; margin: 2px 0 0; }
-.group-title.travel::before { background: var(--travel); }
 
 .reminder {
     display: flex; align-items: center; gap: 12px;

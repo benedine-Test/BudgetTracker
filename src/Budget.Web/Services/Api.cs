@@ -37,7 +37,7 @@ public record AccountDto(int Id, string Name, string Kind, string Currency, deci
 
 // ---- Savings pockets and the Safety Fund ----
 
-/// <summary>Type: "Main" | "Saving" | "Boost". Purpose: "SafetyFund" | "Travel" | "Other". Interest figures are estimates.</summary>
+/// <summary>Type: "Main" | "Saving" | "Boost". Purpose: "SafetyFund" | "Other". Interest figures are estimates.</summary>
 public record PocketDto(int AccountId, string Name, string Bank, string Type, string Purpose, decimal Balance, bool IsArchived,
     decimal InterestRatePct, decimal? BonusRatePct, decimal TotalRatePct,
     DateOnly? StartDate, int? TermMonths, DateOnly? MaturityDate, decimal? PromoCashback, decimal? GoalAmount,
@@ -46,7 +46,7 @@ public record PocketDto(int AccountId, string Name, string Bank, string Type, st
 
 public record SafetyFundDto(string Currency, decimal EmergencyTarget, decimal? ParentsTarget, decimal Target,
     decimal Ready, decimal Locked, decimal Total, decimal PercentOfTarget,
-    List<PocketDto> Safety, List<PocketDto> Travel, List<PocketDto> Other);
+    List<PocketDto> Safety, List<PocketDto> Other);
 
 public record PocketSave(string Name, string? Bank, string Type, string Purpose, decimal InterestRatePct,
     decimal? BonusRatePct, DateOnly? StartDate, int? TermMonths, DateOnly? MaturityDate,

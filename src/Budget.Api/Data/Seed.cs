@@ -13,8 +13,6 @@ public static class Seed
     private const string OldTransport = "Transport";
     /// <summary>Money put into a Safety Fund pocket from a pay period (see SavingsTransfers).</summary>
     public const string SafetyFundCategory = "Safety Fund";
-    /// <summary>Money put into any other savings pocket (Travel) from a pay period.</summary>
-    public const string SavingsGoalsCategory = "Savings Goals";
 
     private static readonly (string Name, Bucket Bucket)[] Categories =
     [
@@ -41,7 +39,7 @@ public static class Seed
         ("Investments", Bucket.Savings),
         ("Emergency Fund", Bucket.Savings),
         (SafetyFundCategory, Bucket.Savings),
-        (SavingsGoalsCategory, Bucket.Savings),
+        ("Savings Goals", Bucket.Savings),
         // Income / transfers
         ("Salary", Bucket.Income),
         ("Other Income", Bucket.Income),
@@ -141,9 +139,8 @@ public static class Seed
             // Added after the first release, so databases seeded before it don't have it yet.
             if (!await db.Categories.AnyAsync(c => c.Name == SharedBills.RepaymentCategory))
                 db.Categories.Add(new Category { Name = SharedBills.RepaymentCategory, Bucket = Bucket.Income });
-            foreach (var (name, bucket) in new[] { (SafetyFundCategory, Bucket.Savings), (SavingsGoalsCategory, Bucket.Savings) })
-                if (!await db.Categories.AnyAsync(c => c.Name == name))
-                    db.Categories.Add(new Category { Name = name, Bucket = bucket });
+            if (!await db.Categories.AnyAsync(c => c.Name == SafetyFundCategory))
+                db.Categories.Add(new Category { Name = SafetyFundCategory, Bucket = Bucket.Savings });
 
             await SplitTransportAsync(db);
         }

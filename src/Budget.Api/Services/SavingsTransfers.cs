@@ -13,24 +13,22 @@ public class SavingsException(string message) : Exception(message);
 public static class TransferRules
 {
     /// <summary>
-    /// Savings when money from a pay period goes into a pocket kept for something (Safety Fund, Travel);
-    /// otherwise Transfer, which budgets ignore. Not savings: money you'd already saved being moved
-    /// (<paramref name="alreadySaved"/>), money moving between savings pockets (a Saving Pocket into a
-    /// Boost Pocket), and money into an account that isn't a savings pocket.
+    /// Savings when money from a pay period goes into a Safety Fund pocket; otherwise Transfer, which
+    /// budgets ignore. Not savings: money you'd already saved being moved (<paramref name="alreadySaved"/>),
+    /// money moving between Safety Fund pockets (a Saving Pocket into a Boost Pocket), and money into any
+    /// other account or pocket.
     /// </summary>
     public static Bucket OutSide(PocketTerms? from, PocketTerms? to, bool alreadySaved)
     {
         if (alreadySaved) return Bucket.Transfer;
-        if (to is null || to.Purpose == PocketPurpose.Other) return Bucket.Transfer;
-        if (from is not null && from.Purpose != PocketPurpose.Other) return Bucket.Transfer;
+        if (to?.Purpose != PocketPurpose.SafetyFund) return Bucket.Transfer;
+        if (from?.Purpose == PocketPurpose.SafetyFund) return Bucket.Transfer;
         return Bucket.Savings;
     }
 
     /// <summary>The category the money-out side is filed under.</summary>
     public static string OutCategory(PocketTerms? from, PocketTerms? to, bool alreadySaved) =>
-        OutSide(from, to, alreadySaved) == Bucket.Transfer ? "Transfer"
-        : to!.Purpose == PocketPurpose.SafetyFund ? Seed.SafetyFundCategory
-        : Seed.SavingsGoalsCategory;
+        OutSide(from, to, alreadySaved) == Bucket.Savings ? Seed.SafetyFundCategory : "Transfer";
 }
 
 /// <summary>

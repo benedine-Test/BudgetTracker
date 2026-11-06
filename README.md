@@ -29,7 +29,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Total assets** (linked from Accounts and Invest) — bank and cash balances plus everything under Invest in one figure, with the mix, every item, and net worth after what's owed on cards.
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 - **Goals** (linked from Budget) — spending limits per pay period on a category or a whole bucket, and amounts to save. Each shows how this pay period is going and whether it was kept in the last three. **Get ideas** asks the AI helper to suggest goals from your own spending; tap **Save goal** on the ones you want.
-- **Safety Fund** (linked from Budget and Accounts) — savings pockets such as GXS Bank's Main Account, Saving Pockets and Boost Pockets, the Safety Fund target (emergency fund + an optional amount for parents), a bar split into *Ready cash* and *Locked*, estimated interest per pocket, a separate Travel pocket with its own goal, and moves to make each payday. See *Safety Fund and savings pockets* below.
+- **Safety Fund** (linked from Budget and Accounts) — savings pockets such as GXS Bank's Main Account, Saving Pockets and Boost Pockets, the Safety Fund target (emergency fund + an optional amount for parents), a bar split into *Ready cash* and *Locked*, estimated interest per pocket, other pockets listed apart, and moves to make each payday. See *Safety Fund and savings pockets* below.
 - **Ask** — type a question about your money ("Can I send my parents $400 a month?") and get an answer worked out from your own data. See *Ask (AI helper)* below.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
@@ -118,13 +118,13 @@ Limits: scanned PDFs can't be read. A consolidated statement covering several ac
 Banks with no card feed (GXS) are entered by hand here.
 
 - **A pocket is an account.** Each GXS pocket (Main Account, Saving Pocket, Boost Pocket) is a bank account on Accounts, labelled e.g. *GXS Bank · Boost Pocket*, with its rate, and for a Boost Pocket its start date, term, maturity date (start + term, editable), bonus rate and promo cashback.
-- **What it's for.** *Safety Fund* pockets count toward the Safety Fund: Saving Pockets as *Ready cash*, Boost Pockets as *Locked* until they mature. *Travel* pockets are shown apart with their own goal. *Other* (e.g. the Main Account) isn't counted.
+- **What it's for.** *Safety Fund* pockets count toward the Safety Fund: Saving Pockets as *Ready cash*, Boost Pockets as *Locked* until they mature. Any other pocket (e.g. the Main Account) is listed apart, can have its own goal, and isn't counted. (Travel pockets were removed; any saved as Travel become other pockets on startup.)
 - **Moving money is never spending.** A move is two linked entries: money out of one account, money in to the other. Deleting or editing one side changes both. How it counts in 50/30/20:
-  - From an ordinary account into a Safety Fund or Travel pocket, out of this pay → **Savings** (*Safety Fund* or *Savings Goals*).
+  - From an ordinary account into a Safety Fund pocket, out of this pay → **Savings** (*Safety Fund*).
   - Money you'd already saved ("Money I'd already saved" ticked; the default when adding a pocket) → only moved: it counts toward the Safety Fund, not this pay period.
-  - Between pockets (Saving Pocket → Boost Pocket), or into a non-savings account → only moved.
+  - Between Safety Fund pockets (Saving Pocket → Boost Pocket), or into any other account or pocket → only moved.
   - Needs and Wants never see a move.
-- **Each payday.** Plan regular moves (e.g. S$300 → Safety fund, S$100 → Travel) from a start date. Pay periods starting on or after it show them under *Planned savings* on Budget; ticking one records the move in that period, unticking removes it.
+- **Each payday.** Plan regular moves (e.g. S$300 → Safety fund) from a start date. Pay periods starting on or after it show them under *Planned savings* on Budget; ticking one records the move in that period, unticking removes it.
 - **Interest** is an estimate: each day's closing balance × rate ÷ 365. *Interest at maturity* assumes the balance stays as it is.
 - **Reminders** on Budget: each Boost Pocket's maturity date ("move it into a longer Boost Pocket or SSB"), and, from the first money into a Safety Fund Saving Pocket, "move it into a new Boost Pocket" every 4 months (*Done* sets the next one).
 - Endpoints: `GET /api/savings`, `PUT /api/savings/targets`, `POST/PUT /api/savings/pockets[/{accountId}]`, `POST /api/savings/transfers`, `GET/POST/PUT/DELETE /api/savings/planned[/{id}]`, `GET /api/savings/planned/period?date=`, `POST/DELETE /api/savings/planned/{id}/tick`, `GET /api/savings/reminders`, `POST /api/savings/reminders/{id}/done`.

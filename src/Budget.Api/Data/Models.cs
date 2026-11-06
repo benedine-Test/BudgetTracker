@@ -351,12 +351,14 @@ public enum PocketType
     Boost = 2
 }
 
-/// <summary>What a pocket's money is for. Only Safety Fund pockets count toward the Safety Fund.</summary>
+/// <summary>
+/// What a pocket's money is for. Only Safety Fund pockets count toward the Safety Fund.
+/// (2 was Travel, since removed; SchemaUpgrade turns any stored 2 into Other.)
+/// </summary>
 public enum PocketPurpose
 {
     Other = 0,
-    SafetyFund = 1,
-    Travel = 2
+    SafetyFund = 1
 }
 
 /// <summary>
@@ -383,7 +385,7 @@ public class PocketTerms
     public DateOnly? MaturityDate { get; set; }
     /// <summary>A promo cash amount paid at maturity.</summary>
     public decimal? PromoCashback { get; set; }
-    /// <summary>A pocket's own goal (the Travel pocket's). Null = none.</summary>
+    /// <summary>A pocket's own goal, for pockets outside the Safety Fund. Null = none.</summary>
     public decimal? GoalAmount { get; set; }
 
     public decimal TotalRatePct => InterestRatePct + (BonusRatePct ?? 0);
