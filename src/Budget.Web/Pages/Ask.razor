@@ -1,0 +1,125 @@
+@page "/ask"
+@inject Api Api
+
+<PageTitle>Ask</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Ask</h1>
+        <p class="sub">Questions about your money, answered from your data</p>
+    </div>
+    @if (turns.Count > 0)
+    {
+        <button type="button" class="btn small nowrap" @onclick="Clear" disabled="@busy">New chat</button>
+    }
+</header>
+
+@if (configured is false)
+{
+    <section class="card">
+        <h2>Not set up yet</h2>
+        <p class="muted">The AI helper needs an Anthropic API key on the server. In Azure, add an app setting
+            named <b>Anthropic__ApiKey</b> with your key, then open this screen again.</p>
+    </section>
+}
+else
+{
+    @if (turns.Count == 0)
+    {
+        <section class="card">
+            <h2>Try asking</h2>
+            <div class="chips wrap ask-suggest">
+                @foreach (var s in Suggestions)
+                {
+                    <button type="button" class="chip" disabled="@busy" @onclick="() => Send(s)">@s</button>
+                }
+            </div>
+            <p class="hint">It reads your budget, spending, accounts, subscriptions and investments to answer. It can't change anything.
+                Your question and the figures it looks at are sent to Anthropic's AI service.</p>
+        </section>
+    }
+
+    <div class="chat" aria-live="polite">
+        @foreach (var t in turns)
+        {
+            <div class="bubble @(t.Role switch { "user" => "me", "error" => "error", _ => "ai" })">
+                <div class="bubble-text">@t.Text</div>
+                @if (t.Looked is { Count: > 0 } looked)
+                {
+                    <div class="bubble-meta">Checked: @string.Join(" · ", looked)</div>
+                }
+            </div>
+        }
+        @if (busy)
+        {
+            <div class="bubble ai thinking" role="status">Looking through your data…</div>
+        }
+    </div>
+
+    <form class="ask-box" @onsubmit="() => Send(draft)" @onsubmit:preventDefault>
+        <label for="ask-q" class="sr-only">Your question</label>
+        <textarea id="ask-q" rows="2" maxlength="1000" placeholder="e.g. Can I afford a $1,200 holiday in March?"
+                  @bind="draft" @bind:event="oninput" disabled="@busy"></textarea>
+        <button type="submit" class="btn primary" disabled="@(busy || string.IsNullOrWhiteSpace(draft))">Ask</button>
+    </form>
+}
+
+@code {
+    private static readonly string[] Suggestions =
+    [
+        "Can I send my parents $400 a month?",
+        "Where did most of my money go this pay period?",
+        "How much do I spend on food delivery a month?",
+        "Am I on track with my savings?",
+    ];
+
+    private sealed record Turn(string Role, string Text, List<string>? Looked = null);
+
+    private readonly List<Turn> turns = [];
+    private string draft = "";
+    private bool busy;
+    private bool? configured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            configured = (await Api.AskStatus()).Configured;
+        }
+        catch (ApiException)
+        {
+            configured = null; // Asking will show the real problem.
+        }
+    }
+
+    private async Task Send(string question)
+    {
+        question = question.Trim();
+        if (busy || question.Length == 0) return;
+
+        var history = turns.Where(t => !t.Role.StartsWith("error"))
+            .Select(t => new AskTurn(t.Role, t.Text)).ToList();
+        turns.Add(new Turn("user", question));
+        draft = "";
+        busy = true;
+        try
+        {
+            var a = await Api.Ask(question, history);
+            turns.Add(new Turn("assistant", a.Answer, a.Looked));
+        }
+        catch (ApiException e)
+        {
+            turns.Add(new Turn("error", e.Message));
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Clear()
+    {
+        turns.Clear();
+        draft = "";
+    }
+}

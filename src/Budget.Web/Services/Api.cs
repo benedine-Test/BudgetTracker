@@ -47,6 +47,14 @@ public record RecurringDto(string Pattern, string Name, string Cadence, string C
 public record SubscriptionsDto(decimal MonthlyTotal, decimal YearlyTotal, decimal DueNext30Days, string Currency,
     List<RecurringDto> Items, int Dismissed);
 
+/// <summary>Role: "user" | "assistant".</summary>
+public record AskTurn(string Role, string Text);
+
+/// <param name="Looked">What the assistant checked to answer, shown under it.</param>
+public record AskAnswer(string Answer, List<string> Looked);
+
+public record AskStatus(bool Configured);
+
 public record DismissedDto(int Id, string Pattern, decimal Amount, DateTime CreatedAtUtc);
 
 public record AccountsSummary(decimal InAccounts, decimal OwedOnCards, decimal Net, string Currency,
@@ -259,6 +267,12 @@ public class Api(HttpClient http)
         Send(HttpMethod.Put, $"api/accounts/{id}", new { name, kind, cardNames, isArchived, statementDay });
 
     public Task<List<CardStatementDto>> CardStatements() => Get<List<CardStatementDto>>("api/accounts/statements");
+
+    // ---- Ask (AI helper) ----
+    public Task<AskStatus> AskStatus() => Get<AskStatus>("api/ask/status");
+
+    public Task<AskAnswer> Ask(string question, List<AskTurn> history) =>
+        Post<AskAnswer>("api/ask", new { question, history });
 
     // ---- Subscriptions ----
     public Task<SubscriptionsDto> Subscriptions() => Get<SubscriptionsDto>("api/subscriptions");

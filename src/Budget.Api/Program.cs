@@ -25,6 +25,7 @@ builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<SharedBills>();
 builder.Services.AddScoped<Subscriptions>();
 builder.Services.AddScoped<PriceRefresher>();
+builder.Services.AddScoped<MoneyAssistant>();
 builder.Services.AddHttpClient<IQuoteSource, YahooQuoteSource>(c =>
 {
     c.BaseAddress = new Uri("https://query1.finance.yahoo.com/");
@@ -79,6 +80,7 @@ api.MapBudgetEndpoints();
 api.MapAccountEndpoints();
 api.MapPolicyEndpoints();
 api.MapSubscriptionEndpoints();
+api.MapAskEndpoints();
 
 // Unknown /api paths are a 404, not the app page.
 app.Map("/api/{**rest}", () => Results.NotFound());
