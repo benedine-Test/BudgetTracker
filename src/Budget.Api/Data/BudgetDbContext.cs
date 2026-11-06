@@ -16,6 +16,10 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<PolicyValuation> PolicyValuations => Set<PolicyValuation>();
     public DbSet<DismissedRecurring> DismissedRecurring => Set<DismissedRecurring>();
     public DbSet<Goal> Goals => Set<Goal>();
+    public DbSet<PocketTerms> PocketTerms => Set<PocketTerms>();
+    public DbSet<PlannedTransfer> PlannedTransfers => Set<PlannedTransfer>();
+    public DbSet<PlannedTransferTick> PlannedTransferTicks => Set<PlannedTransferTick>();
+    public DbSet<Reminder> Reminders => Set<Reminder>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -35,6 +39,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(t => t.MyShare).HasPrecision(18, 2);
             e.Property(t => t.SharedWith).HasMaxLength(100);
             e.HasIndex(t => t.RepaysId);
+            e.HasIndex(t => t.PairId);
             e.Ignore(t => t.CountedAmount);
         });
 
@@ -68,6 +73,8 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(s => s.NeedsPct).HasPrecision(5, 2);
             e.Property(s => s.WantsPct).HasPrecision(5, 2);
             e.Property(s => s.SavingsPct).HasPrecision(5, 2);
+            e.Property(s => s.EmergencyTarget).HasPrecision(18, 2);
+            e.Property(s => s.ParentsTarget).HasPrecision(18, 2);
         });
 
         b.Entity<Holding>(e =>
@@ -110,5 +117,28 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.Property(g => g.Amount).HasPrecision(18, 2);
             e.Property(g => g.Reason).HasMaxLength(300);
         });
+
+        // Savings pockets, planned transfers and reminders: linked by id only, like the tables above.
+        b.Entity<PocketTerms>(e =>
+        {
+            e.Property(p => p.Bank).HasMaxLength(100);
+            e.Property(p => p.InterestRatePct).HasPrecision(7, 4);
+            e.Property(p => p.BonusRatePct).HasPrecision(7, 4);
+            e.Property(p => p.PromoCashback).HasPrecision(18, 2);
+            e.Property(p => p.GoalAmount).HasPrecision(18, 2);
+            e.HasIndex(p => p.AccountId).IsUnique();
+            e.Ignore(p => p.TotalRatePct);
+        });
+
+        b.Entity<PlannedTransfer>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(100);
+            e.Property(p => p.Amount).HasPrecision(18, 2);
+        });
+
+        b.Entity<PlannedTransferTick>(e =>
+            e.HasIndex(t => new { t.PlannedTransferId, t.PeriodStart }).IsUnique());
+
+        b.Entity<Reminder>(e => e.Property(r => r.Text).HasMaxLength(300));
     }
 }

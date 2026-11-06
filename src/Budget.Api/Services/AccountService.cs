@@ -7,7 +7,7 @@ namespace Budget.Api.Services;
 public record AccountView(
     int Id, string Name, string Kind, string Currency, decimal Balance,
     decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived,
-    DateTimeOffset? LastImportAt, int? StatementDay = null);
+    DateTimeOffset? LastImportAt, int? StatementDay = null, string? Pocket = null);
 
 /// <summary>
 /// Where a credit card's current statement stands. Charged = purchases on the card in the cycle less
@@ -68,13 +68,14 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             .Where(t => t.AccountId == null && t.OccurredAtUtc >= oldestAnchor)
             .Select(t => t.Amount).ToListAsync(ct)).Count(amt => amt != 0);
 
+        var pockets = await db.PocketTerms.AsNoTracking().ToDictionaryAsync(p => p.AccountId, ct);
         var views = new List<AccountView>();
         foreach (var a in accounts.Where(a => includeArchived || !a.IsArchived))
         {
             var mine = linked.Where(t => t.AccountId == a.Id)
                 .Select(t => (t.OccurredAtUtc, t.IsIncome ? t.Amount : -t.Amount));
             var balance = AccountMath.BalanceAt(a.AnchorBalance, a.BalanceAsOfUtc, mine, DateTime.MaxValue);
-            views.Add(ToView(a, balance));
+            views.Add(ToView(a, balance, pockets.GetValueOrDefault(a.Id)));
         }
 
         var active = views.Where(v => !v.IsArchived && v.Currency == settings.BaseCurrency).ToList();
@@ -92,10 +93,18 @@ public class AccountService(BudgetDbContext db, Categorizer categorizer, BudgetS
             txs.Select(t => (t.OccurredAtUtc, t.IsIncome ? t.Amount : -t.Amount)), DateTime.MaxValue);
     }
 
-    public static AccountView ToView(Account a, decimal balance) => new(
+    public static AccountView ToView(Account a, decimal balance, PocketTerms? pocket = null) => new(
         a.Id, a.Name, a.Kind.ToString(), a.Currency, balance, a.AnchorBalance,
         Local(a.BalanceAsOfUtc), a.CardNames, a.IsArchived,
-        a.LastImportAtUtc is { } li ? Local(li) : null, a.StatementDay);
+        a.LastImportAtUtc is { } li ? Local(li) : null, a.StatementDay,
+        pocket is null ? null : $"{pocket.Bank} · {PocketLabel(pocket.Type)}");
+
+    public static string PocketLabel(PocketType type) => type switch
+    {
+        PocketType.Main => "Main Account",
+        PocketType.Saving => "Saving Pocket",
+        _ => "Boost Pocket"
+    };
 
     // ---- Credit card statement cycles ----
 

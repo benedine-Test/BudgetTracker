@@ -338,6 +338,153 @@ public static class SchemaUpgrade
                       );
                       """, ct);
             }
+
+            // ---- Savings pockets, the Safety Fund, planned transfers and reminders ----
+            if (await TableExistsAsync(conn, "Settings", sqlServer, ct))
+            {
+                if (!await ColumnExistsAsync(conn, "Settings", "EmergencyTarget", sqlServer, ct))
+                    await db.Database.ExecuteSqlRawAsync(sqlServer
+                        ? "ALTER TABLE [Settings] ADD [EmergencyTarget] decimal(18,2) NOT NULL DEFAULT 12000;"
+                        : "ALTER TABLE \"Settings\" ADD COLUMN \"EmergencyTarget\" TEXT NOT NULL DEFAULT '12000.0';", ct);
+                if (!await ColumnExistsAsync(conn, "Settings", "ParentsTarget", sqlServer, ct))
+                    await db.Database.ExecuteSqlRawAsync(sqlServer
+                        ? "ALTER TABLE [Settings] ADD [ParentsTarget] decimal(18,2) NULL;"
+                        : "ALTER TABLE \"Settings\" ADD COLUMN \"ParentsTarget\" TEXT NULL;", ct);
+            }
+
+            if (!await ColumnExistsAsync(conn, "Transactions", "PairId", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "ALTER TABLE [Transactions] ADD [PairId] int NULL;"
+                    : "ALTER TABLE \"Transactions\" ADD COLUMN \"PairId\" INTEGER NULL;", ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE INDEX [IX_Transactions_PairId] ON [Transactions] ([PairId]);"
+                    : "CREATE INDEX \"IX_Transactions_PairId\" ON \"Transactions\" (\"PairId\");", ct);
+            }
+
+            if (!await TableExistsAsync(conn, "PocketTerms", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PocketTerms] (
+                          [Id] int NOT NULL IDENTITY,
+                          [AccountId] int NOT NULL,
+                          [Bank] nvarchar(100) NOT NULL,
+                          [Type] int NOT NULL,
+                          [Purpose] int NOT NULL,
+                          [InterestRatePct] decimal(7,4) NOT NULL,
+                          [BonusRatePct] decimal(7,4) NULL,
+                          [StartDate] date NULL,
+                          [TermMonths] int NULL,
+                          [MaturityDate] date NULL,
+                          [PromoCashback] decimal(18,2) NULL,
+                          [GoalAmount] decimal(18,2) NULL,
+                          CONSTRAINT [PK_PocketTerms] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PocketTerms" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PocketTerms" PRIMARY KEY AUTOINCREMENT,
+                          "AccountId" INTEGER NOT NULL,
+                          "Bank" TEXT NOT NULL,
+                          "Type" INTEGER NOT NULL,
+                          "Purpose" INTEGER NOT NULL,
+                          "InterestRatePct" TEXT NOT NULL,
+                          "BonusRatePct" TEXT NULL,
+                          "StartDate" TEXT NULL,
+                          "TermMonths" INTEGER NULL,
+                          "MaturityDate" TEXT NULL,
+                          "PromoCashback" TEXT NULL,
+                          "GoalAmount" TEXT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE UNIQUE INDEX [IX_PocketTerms_AccountId] ON [PocketTerms] ([AccountId]);"
+                    : "CREATE UNIQUE INDEX \"IX_PocketTerms_AccountId\" ON \"PocketTerms\" (\"AccountId\");", ct);
+            }
+
+            if (!await TableExistsAsync(conn, "PlannedTransfers", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PlannedTransfers] (
+                          [Id] int NOT NULL IDENTITY,
+                          [Name] nvarchar(100) NOT NULL,
+                          [Amount] decimal(18,2) NOT NULL,
+                          [FromAccountId] int NOT NULL,
+                          [ToAccountId] int NOT NULL,
+                          [StartsOn] date NOT NULL,
+                          [IsActive] bit NOT NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_PlannedTransfers] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PlannedTransfers" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PlannedTransfers" PRIMARY KEY AUTOINCREMENT,
+                          "Name" TEXT NOT NULL,
+                          "Amount" TEXT NOT NULL,
+                          "FromAccountId" INTEGER NOT NULL,
+                          "ToAccountId" INTEGER NOT NULL,
+                          "StartsOn" TEXT NOT NULL,
+                          "IsActive" INTEGER NOT NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+            }
+
+            if (!await TableExistsAsync(conn, "PlannedTransferTicks", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [PlannedTransferTicks] (
+                          [Id] int NOT NULL IDENTITY,
+                          [PlannedTransferId] int NOT NULL,
+                          [PeriodStart] date NOT NULL,
+                          [TransactionId] int NOT NULL,
+                          [DoneAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_PlannedTransferTicks] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "PlannedTransferTicks" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_PlannedTransferTicks" PRIMARY KEY AUTOINCREMENT,
+                          "PlannedTransferId" INTEGER NOT NULL,
+                          "PeriodStart" TEXT NOT NULL,
+                          "TransactionId" INTEGER NOT NULL,
+                          "DoneAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE UNIQUE INDEX [IX_PlannedTransferTicks_PlannedTransferId_PeriodStart] ON [PlannedTransferTicks] ([PlannedTransferId], [PeriodStart]);"
+                    : "CREATE UNIQUE INDEX \"IX_PlannedTransferTicks_PlannedTransferId_PeriodStart\" ON \"PlannedTransferTicks\" (\"PlannedTransferId\", \"PeriodStart\");", ct);
+            }
+
+            if (!await TableExistsAsync(conn, "Reminders", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [Reminders] (
+                          [Id] int NOT NULL IDENTITY,
+                          [Text] nvarchar(300) NOT NULL,
+                          [NextDue] date NOT NULL,
+                          [RepeatMonths] int NOT NULL,
+                          [AccountId] int NULL,
+                          [CreatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_Reminders] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "Reminders" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_Reminders" PRIMARY KEY AUTOINCREMENT,
+                          "Text" TEXT NOT NULL,
+                          "NextDue" TEXT NOT NULL,
+                          "RepeatMonths" INTEGER NOT NULL,
+                          "AccountId" INTEGER NULL,
+                          "CreatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+            }
         }
         finally
         {

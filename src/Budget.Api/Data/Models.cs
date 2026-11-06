@@ -148,6 +148,12 @@ public class Transaction
     /// It is added to the CPF holdings (see Portfolio.SalaryCpf); deleting the salary takes it back out.
     /// </summary>
     public decimal? CpfContribution { get; set; }
+    /// <summary>
+    /// The other side of a move between your own accounts recorded by <see cref="Services.SavingsTransfers"/>
+    /// (money out of one, money into the other). Deleting either side deletes both.
+    /// </summary>
+    public int? PairId { get; set; }
+    /// <summary>
     /// A bill paid for others too: the part that was yours. Only this counts toward the budget;
     /// the rest is owed back until repayments (<see cref="RepaysId"/>) cover it or it's written off.
     /// Null = all of it was yours.
@@ -199,6 +205,10 @@ public class AppSettings
     public string BaseCurrency { get; set; } = "SGD";
     /// <summary>From the Profile page. Sets the CPF age band for each salary (see Payslip.AgeBandOn).</summary>
     public DateOnly? BirthDate { get; set; }
+    /// <summary>Safety Fund target: the emergency part.</summary>
+    public decimal EmergencyTarget { get; set; } = 12000m;
+    /// <summary>Safety Fund target: the rainy-day money kept for parents. Null = not set yet.</summary>
+    public decimal? ParentsTarget { get; set; }
 }
 
 public enum AssetClass
@@ -328,5 +338,90 @@ public class Goal
     public decimal Amount { get; set; }
     /// <summary>Why: "So I can send my parents $400 a month".</summary>
     public string? Reason { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+public enum PocketType
+{
+    /// <summary>The bank's main account.</summary>
+    Main = 0,
+    /// <summary>Savings you can take out any time.</summary>
+    Saving = 1,
+    /// <summary>Locked for a fixed term at a higher rate.</summary>
+    Boost = 2
+}
+
+/// <summary>What a pocket's money is for. Only Safety Fund pockets count toward the Safety Fund.</summary>
+public enum PocketPurpose
+{
+    Other = 0,
+    SafetyFund = 1,
+    Travel = 2
+}
+
+/// <summary>
+/// A savings pocket (GXS Main Account, Saving Pocket, Boost Pocket) is an ordinary <see cref="Account"/>,
+/// so its balance, entries and the bank total work as for any account. This row holds its pocket details.
+/// Linked to the account by id only, like PolicyTerms to its holding; removed with the account.
+/// </summary>
+public class PocketTerms
+{
+    public int Id { get; set; }
+    public int AccountId { get; set; }
+    /// <summary>"GXS Bank".</summary>
+    public string Bank { get; set; } = "";
+    public PocketType Type { get; set; }
+    public PocketPurpose Purpose { get; set; }
+    /// <summary>Base interest, % a year.</summary>
+    public decimal InterestRatePct { get; set; }
+    /// <summary>Boost Pockets: bonus interest on top of the base, % a year.</summary>
+    public decimal? BonusRatePct { get; set; }
+    /// <summary>When interest starts (a Boost Pocket's start date).</summary>
+    public DateOnly? StartDate { get; set; }
+    public int? TermMonths { get; set; }
+    /// <summary>Boost Pockets: the day it matures. Start + term by default; can be corrected.</summary>
+    public DateOnly? MaturityDate { get; set; }
+    /// <summary>A promo cash amount paid at maturity.</summary>
+    public decimal? PromoCashback { get; set; }
+    /// <summary>A pocket's own goal (the Travel pocket's). Null = none.</summary>
+    public decimal? GoalAmount { get; set; }
+
+    public decimal TotalRatePct => InterestRatePct + (BonusRatePct ?? 0);
+}
+
+/// <summary>A move to make every pay period ("S$300 to Safety fund"), ticked off once done.</summary>
+public class PlannedTransfer
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public decimal Amount { get; set; }
+    public int FromAccountId { get; set; }
+    public int ToAccountId { get; set; }
+    /// <summary>Shown in pay periods that start on or after this day.</summary>
+    public DateOnly StartsOn { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+/// <summary>A planned transfer done in one pay period, with the money-out entry it recorded.</summary>
+public class PlannedTransferTick
+{
+    public int Id { get; set; }
+    public int PlannedTransferId { get; set; }
+    /// <summary>Start of the pay period it was done for.</summary>
+    public DateOnly PeriodStart { get; set; }
+    public int TransactionId { get; set; }
+    public DateTime DoneAtUtc { get; set; }
+}
+
+/// <summary>A dashboard reminder that comes back every <see cref="RepeatMonths"/> once marked done.</summary>
+public class Reminder
+{
+    public int Id { get; set; }
+    public string Text { get; set; } = "";
+    public DateOnly NextDue { get; set; }
+    public int RepeatMonths { get; set; }
+    /// <summary>The pocket it is about, if any.</summary>
+    public int? AccountId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
