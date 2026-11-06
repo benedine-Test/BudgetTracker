@@ -38,6 +38,7 @@ else
             <span class="sub">@Fmt.Money(s.OwedOnCards) owed on cards · @Fmt.Money(s.Net) after paying them</span>
         }
         <span class="sub"><a class="link" style="margin-left:0" href="assets">Total assets with investments ›</a></span>
+        <span class="sub"><a class="link" style="margin-left:0" href="savings">Safety Fund and savings pockets ›</a></span>
     </section>
 
     @if (s.UnassignedSinceOldest > 0)
@@ -66,7 +67,7 @@ else
             <button type="button" class="row tx" @onclick="async () => await Open(a)">
                 <span class="row-main">
                     <span class="tx-name">@a.Name</span>
-                    <span class="muted">@KindLabel(a.Kind) · @Freshness(a)</span>
+                    <span class="muted">@(a.Pocket ?? KindLabel(a.Kind)) · @Freshness(a)</span>
                 </span>
                 <span class="row-end">
                     <span class="num @(a.Balance < 0 ? "neg" : "")">@BalanceText(a)</span>

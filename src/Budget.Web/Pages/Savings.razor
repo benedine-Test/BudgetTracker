@@ -1,0 +1,544 @@
+@page "/savings"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Safety Fund</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Safety Fund</h1>
+        <div class="sub"><a href="">‹ Budget</a> · <a href="accounts">Accounts</a></div>
+    </div>
+    <button type="button" class="btn small primary nowrap" @onclick="OpenAddPocket">Add pocket</button>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (f is null)
+{
+    <Loading />
+}
+else
+{
+    <section class="card hero soft-mint">
+        <p class="label">Set aside, not to touch</p>
+        <p class="big">@Fmt.Money(f.Total, f.Currency)</p>
+        <p class="sub">of @Fmt.Money(f.Target, f.Currency) · @Fmt.Percent(f.PercentOfTarget)</p>
+
+        <div class="stack fund-bar" role="img" aria-label="@($"{Fmt.Money(f.Ready)} ready, {Fmt.Money(f.Locked)} locked, of {Fmt.Money(f.Target)}")">
+            @if (f.Ready > 0)
+            {
+                <span class="slice ready" style="width:@Share(f.Ready)"></span>
+            }
+            @if (f.Locked > 0)
+            {
+                <span class="slice locked" style="width:@Share(f.Locked)"></span>
+            }
+        </div>
+        <ul class="legend fund-legend">
+            <li><span class="swatch ready"></span><span>🌿 Ready cash <span class="muted small">Saving Pockets</span></span><span class="num">@Fmt.Money(f.Ready, f.Currency)</span></li>
+            <li><span class="swatch locked"></span><span>🔒 Locked <span class="muted small">Boost Pockets</span></span><span class="num">@Fmt.Money(f.Locked, f.Currency)</span></li>
+            @if (f.Target > f.Total)
+            {
+                <li><span class="swatch togo"></span><span>To go</span><span class="num">@Fmt.Money(f.Target - f.Total, f.Currency)</span></li>
+            }
+        </ul>
+    </section>
+
+    <section class="card">
+        <div class="bucket-head">
+            <h2>🎯 Target</h2>
+            <button type="button" class="link" @onclick="StartTargets">@(editTargets ? "Cancel" : "Change")</button>
+        </div>
+        @if (editTargets)
+        {
+            <form @onsubmit="SaveTargets" @onsubmit:preventDefault>
+                <label for="t-em">Emergency fund (S$)</label>
+                <input id="t-em" type="number" inputmode="decimal" min="0" step="1" @bind="emergencyTarget" />
+                <label for="t-pa">Rainy-day money for my parents (S$)</label>
+                <input id="t-pa" type="number" inputmode="decimal" min="0" step="1" placeholder="Leave blank for now" @bind="parentsTarget" />
+                <button type="submit" class="btn primary block" disabled="@busy">Save target</button>
+            </form>
+        }
+        else
+        {
+            <dl class="facts tight">
+                <dt>Emergency fund</dt><dd>@Fmt.Money(f.EmergencyTarget, f.Currency)</dd>
+                <dt>For my parents</dt><dd>@(f.ParentsTarget is { } p ? Fmt.Money(p, f.Currency) : "Not set yet")</dd>
+                <dt>Safety Fund target</dt><dd>@Fmt.Money(f.Target, f.Currency)</dd>
+            </dl>
+        }
+    </section>
+
+    @if (f.Safety.Count == 0)
+    {
+        <section class="card empty">
+            <p>No Safety Fund pockets yet. Tap <b>Add pocket</b> to add a GXS Boost or Saving Pocket.</p>
+        </section>
+    }
+    else
+    {
+        <h2 class="group-title savings">In the Safety Fund</h2>
+        @foreach (var p in f.Safety)
+        {
+            <PocketCard Pocket="p" OnEdit="() => OpenEditPocket(p)" />
+        }
+    }
+
+    <h2 class="group-title travel">Travel <span class="muted small">· not part of the Safety Fund</span></h2>
+    @if (f.Travel.Count == 0)
+    {
+        <section class="card empty"><p>No Travel pocket yet. Add one with <b>Add pocket</b> and choose “Travel”.</p></section>
+    }
+    @foreach (var p in f.Travel)
+    {
+        <PocketCard Pocket="p" OnEdit="() => OpenEditPocket(p)" />
+    }
+
+    @if (f.Other.Count > 0)
+    {
+        <h2 class="group-title">Other pockets</h2>
+        @foreach (var p in f.Other)
+        {
+            <PocketCard Pocket="p" OnEdit="() => OpenEditPocket(p)" />
+        }
+    }
+
+    <section class="card soft-sky">
+        <div class="bucket-head">
+            <h2>🗓️ Each payday</h2>
+            <button type="button" class="link" @onclick="() => OpenPlan(null)">Add</button>
+        </div>
+        @if (planned.Count == 0)
+        {
+            <p class="muted">Plan a regular move, e.g. S$300 to the Safety fund pocket and S$100 to Travel. It shows under Savings on Budget each pay period, to tick off when done.</p>
+        }
+        else
+        {
+            <div class="rows">
+                @foreach (var p in planned)
+                {
+                    <button type="button" class="row" @onclick="() => OpenPlan(p)">
+                        <span class="row-main">
+                            <span class="tx-name">@p.Name</span>
+                            <span class="muted">@(p.From ?? "Removed account") → @(p.To ?? "Removed account") · from @p.StartsOn.ToString("d MMM yyyy", Inv)@(p.IsActive ? "" : " · paused")</span>
+                        </span>
+                        <span class="num">@Fmt.Money(p.Amount)</span>
+                    </button>
+                }
+            </div>
+            <p class="hint">@Fmt.Money(planned.Where(p => p.IsActive).Sum(p => p.Amount)) a pay period. Ticking one off records the move, so balances and the Savings bucket update.</p>
+        }
+    </section>
+
+    <section class="card quick">
+        <h2>Move money</h2>
+        <p class="muted">Between your own accounts and pockets. Never counted as spending.</p>
+        <button type="button" class="btn" @onclick="OpenMove">⇄ Move money</button>
+    </section>
+
+    <p class="hint center">Interest is an estimate: balance × rate ÷ 365 for each day. Your bank's own figures win.</p>
+}
+
+@* ---------- Add / edit a pocket ---------- *@
+@if (pocketSheet)
+{
+    <Sheet Title="@(editPocket is null ? "Add pocket" : $"Edit {editPocket.Name}")" OnClose="CloseSheets">
+        <form @onsubmit="SavePocket" @onsubmit:preventDefault>
+            <label for="p-name">Name</label>
+            <input id="p-name" type="text" autocapitalize="words" placeholder="e.g. First Boost" @bind="pName" />
+
+            <div class="two">
+                <div>
+                    <label for="p-bank">Bank</label>
+                    <input id="p-bank" type="text" @bind="pBank" />
+                </div>
+                <div>
+                    <label for="p-type">Type</label>
+                    <select id="p-type" @bind="pType" @bind:after="Recalc">
+                        <option value="Boost">Boost Pocket</option>
+                        <option value="Saving">Saving Pocket</option>
+                        <option value="Main">Main Account</option>
+                    </select>
+                </div>
+            </div>
+
+            <label for="p-purpose">What it's for</label>
+            <select id="p-purpose" @bind="pPurpose">
+                <option value="SafetyFund">Safety Fund</option>
+                <option value="Travel">Travel</option>
+                <option value="Other">Other (not counted)</option>
+            </select>
+
+            <div class="two">
+                <div>
+                    <label for="p-rate">@(pType == "Boost" ? "Base rate (% a year)" : "Rate (% a year)")</label>
+                    <input id="p-rate" type="number" inputmode="decimal" min="0" step="0.01" @bind="pRate" />
+                </div>
+                @if (pType == "Boost")
+                {
+                    <div>
+                        <label for="p-bonus">Bonus (% a year)</label>
+                        <input id="p-bonus" type="number" inputmode="decimal" min="0" step="0.01" @bind="pBonus" />
+                    </div>
+                }
+            </div>
+
+            @if (pType == "Boost")
+            {
+                <div class="two">
+                    <div>
+                        <label for="p-start">Start date</label>
+                        <input id="p-start" type="date" @bind="pStart" @bind:after="Recalc" />
+                    </div>
+                    <div>
+                        <label for="p-term">Term (months)</label>
+                        <input id="p-term" type="number" inputmode="numeric" min="1" max="120" @bind="pTerm" @bind:after="Recalc" />
+                    </div>
+                </div>
+                <label for="p-mat">Matures on</label>
+                <input id="p-mat" type="date" @bind="pMaturity" @bind:after="() => maturityTouched = true" />
+                <p class="hint">Worked out from the start and term. Change it if the bank shows a different day.</p>
+
+                <label for="p-cash">Promo cashback at maturity (S$, optional)</label>
+                <input id="p-cash" type="number" inputmode="decimal" min="0" step="0.01" @bind="pCashback" />
+            }
+            else
+            {
+                <label for="p-start2">Earning interest since</label>
+                <input id="p-start2" type="date" @bind="pStart" />
+            }
+
+            @if (pPurpose != "SafetyFund")
+            {
+                <label for="p-goal">Goal for this pocket (S$, optional)</label>
+                <input id="p-goal" type="number" inputmode="decimal" min="0" step="1" @bind="pGoal" />
+            }
+
+            @if (editPocket is null)
+            {
+                <div class="card inset">
+                    <label for="p-from" style="margin-top:0">Move money in from (optional)</label>
+                    <select id="p-from" @bind="pFrom">
+                        <option value="0">Nothing yet</option>
+                        @foreach (var a in Sources)
+                        {
+                            <option value="@a.Id">@a.Name (@Fmt.Money(a.Balance, a.Currency))</option>
+                        }
+                    </select>
+                    @if (pFrom != 0)
+                    {
+                        <label for="p-amt">Amount (S$)</label>
+                        <input id="p-amt" type="number" inputmode="decimal" min="0" step="0.01" @bind="pAmount" />
+                        <label class="check small"><input type="checkbox" @bind="pAlreadySaved" /> Money I'd already saved (not from this pay)</label>
+                        <p class="hint">Ticked: it counts toward the Safety Fund but not this pay period's 50/30/20. Untick if it comes out of this pay.</p>
+                    }
+                </div>
+            }
+
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+        </form>
+    </Sheet>
+}
+
+@* ---------- Move money ---------- *@
+@if (moveSheet)
+{
+    <Sheet Title="Move money" OnClose="CloseSheets">
+        <form @onsubmit="SaveMove" @onsubmit:preventDefault>
+            <label for="m-from">From</label>
+            <select id="m-from" @bind="mFrom">
+                <option value="0">Choose…</option>
+                @foreach (var a in Sources)
+                {
+                    <option value="@a.Id">@a.Name (@Fmt.Money(a.Balance, a.Currency))</option>
+                }
+            </select>
+            <label for="m-to">To</label>
+            <select id="m-to" @bind="mTo">
+                <option value="0">Choose…</option>
+                @foreach (var a in Sources.Where(a => a.Id != mFrom))
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+            <div class="two">
+                <div>
+                    <label for="m-amt">Amount (S$)</label>
+                    <input id="m-amt" type="number" inputmode="decimal" min="0" step="0.01" @bind="mAmount" />
+                </div>
+                <div>
+                    <label for="m-date">Date</label>
+                    <input id="m-date" type="date" @bind="mDate" />
+                </div>
+            </div>
+            <label class="check small"><input type="checkbox" @bind="mAlreadySaved" /> Money I'd already saved (not from this pay)</label>
+            <p class="hint">Into a Safety Fund or Travel pocket from this pay counts as Savings in 50/30/20. Between pockets, or money already saved, is only moved. Needs and Wants are never touched.</p>
+            <label for="m-note">Note (optional)</label>
+            <input id="m-note" type="text" maxlength="200" @bind="mNote" />
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Move it")</button>
+        </form>
+    </Sheet>
+}
+
+@* ---------- Planned transfer ---------- *@
+@if (planSheet)
+{
+    <Sheet Title="@(editPlan is null ? "Plan a payday move" : editPlan.Name)" OnClose="CloseSheets">
+        <form @onsubmit="SavePlan" @onsubmit:preventDefault>
+            <label for="pl-name">Name</label>
+            <input id="pl-name" type="text" placeholder="e.g. Safety fund" @bind="plName" />
+            <label for="pl-amt">Amount each pay period (S$)</label>
+            <input id="pl-amt" type="number" inputmode="decimal" min="0" step="1" @bind="plAmount" />
+            <label for="pl-from">From</label>
+            <select id="pl-from" @bind="plFrom">
+                <option value="0">Choose…</option>
+                @foreach (var a in Sources)
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+            <label for="pl-to">To</label>
+            <select id="pl-to" @bind="plTo">
+                <option value="0">Choose…</option>
+                @foreach (var a in Sources.Where(a => a.Id != plFrom))
+                {
+                    <option value="@a.Id">@a.Name</option>
+                }
+            </select>
+            <label for="pl-start">Starts from the pay period on or after</label>
+            <input id="pl-start" type="date" @bind="plStart" />
+            @if (editPlan is not null)
+            {
+                <label class="check small"><input type="checkbox" @bind="plActive" /> Active</label>
+            }
+            @if (formError is not null)
+            {
+                <p class="field-error" role="alert">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Saving…" : "Save")</button>
+            @if (editPlan is not null)
+            {
+                <button type="button" class="btn danger block" disabled="@busy" @onclick="RemovePlan">Remove plan</button>
+            }
+        </form>
+    </Sheet>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private SafetyFundDto? f;
+    private List<PlannedDto> planned = [];
+    private List<AccountDto> accounts = [];
+    private string? error;
+    private string? formError;
+    private bool busy;
+
+    private bool editTargets;
+    private decimal? emergencyTarget;
+    private decimal? parentsTarget;
+
+    private bool pocketSheet;
+    private PocketDto? editPocket;
+    private string pName = "", pBank = "GXS Bank", pType = "Boost", pPurpose = "SafetyFund";
+    private decimal? pRate, pBonus, pCashback, pGoal, pAmount;
+    private DateOnly? pStart, pMaturity;
+    private int? pTerm;
+    private bool maturityTouched;
+    private int pFrom;
+    private bool pAlreadySaved = true;
+
+    private bool moveSheet;
+    private int mFrom, mTo;
+    private decimal? mAmount;
+    private DateOnly? mDate;
+    private bool mAlreadySaved;
+    private string? mNote;
+
+    private bool planSheet;
+    private PlannedDto? editPlan;
+    private string plName = "";
+    private decimal? plAmount;
+    private int plFrom, plTo;
+    private DateOnly? plStart;
+    private bool plActive = true;
+
+    /// <summary>Accounts money can move between: everything but cards.</summary>
+    private IEnumerable<AccountDto> Sources => accounts.Where(a => a.Kind != "CreditCard" && !a.IsArchived);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            f = await Api.SafetyFund();
+            planned = await Api.Planned();
+            accounts = (await Api.Accounts()).Accounts;
+        }
+        catch (ApiException e) { error = e.Message; }
+    }
+
+    private string Share(decimal part)
+    {
+        var whole = Math.Max(f!.Target, f.Total);
+        return whole <= 0 ? "0%" : (Math.Clamp(part / whole * 100, 0, 100)).ToString("0.#", Inv) + "%";
+    }
+
+    private void CloseSheets()
+    {
+        pocketSheet = moveSheet = planSheet = false;
+        formError = null;
+    }
+
+    // ---- Target ----
+    private void StartTargets()
+    {
+        editTargets = !editTargets;
+        emergencyTarget = Fmt.Trim(f!.EmergencyTarget);
+        parentsTarget = Fmt.Trim(f.ParentsTarget);
+    }
+
+    private async Task SaveTargets()
+    {
+        busy = true;
+        try
+        {
+            f = await Api.SaveTargets(emergencyTarget ?? 0, parentsTarget);
+            editTargets = false;
+            Toast.Show("Target saved");
+        }
+        catch (ApiException e) { Toast.Show(e.Message, true); }
+        finally { busy = false; }
+    }
+
+    // ---- Pockets ----
+    private void OpenAddPocket()
+    {
+        editPocket = null;
+        pName = ""; pBank = "GXS Bank"; pType = "Boost"; pPurpose = "SafetyFund";
+        pRate = pBonus = pCashback = pGoal = pAmount = null;
+        pStart = Fmt.Today; pTerm = 3; pMaturity = null; maturityTouched = false;
+        pFrom = 0; pAlreadySaved = true; formError = null;
+        Recalc();
+        pocketSheet = true;
+    }
+
+    private void OpenEditPocket(PocketDto p)
+    {
+        editPocket = p;
+        pName = p.Name; pBank = p.Bank; pType = p.Type; pPurpose = p.Purpose;
+        pRate = Fmt.Trim(p.InterestRatePct); pBonus = Fmt.Trim(p.BonusRatePct); pCashback = Fmt.Trim(p.PromoCashback);
+        pGoal = Fmt.Trim(p.GoalAmount); pStart = p.StartDate; pTerm = p.TermMonths; pMaturity = p.MaturityDate;
+        maturityTouched = true; formError = null;
+        pocketSheet = true;
+    }
+
+    private void Recalc()
+    {
+        if (pType == "Boost" && !maturityTouched && pStart is { } s && pTerm is > 0)
+            pMaturity = s.AddMonths(pTerm.Value);
+    }
+
+    private async Task SavePocket()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(pName)) { formError = "Give the pocket a name."; return; }
+        if (pRate is null) { formError = "Enter the interest rate (% a year)."; return; }
+        if (editPocket is null && pFrom != 0 && pAmount is not > 0) { formError = "Enter how much to move in, or choose “Nothing yet”."; return; }
+        var body = new PocketSave(pName.Trim(), pBank, pType, pPurpose, pRate.Value, pBonus, pStart, pTerm,
+            pType == "Boost" ? pMaturity : null, pCashback, pGoal,
+            FundFromAccountId: pFrom == 0 ? null : pFrom, FundAmount: pFrom == 0 ? null : pAmount, FundAlreadySaved: pAlreadySaved);
+        busy = true;
+        try
+        {
+            if (editPocket is null) await Api.AddPocket(body);
+            else await Api.UpdatePocket(editPocket.AccountId, body);
+            CloseSheets();
+            Toast.Show(editPocket is null ? $"{body.Name} added" : "Saved");
+            await Load();
+        }
+        catch (ApiException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+
+    // ---- Move money ----
+    private void OpenMove()
+    {
+        mFrom = mTo = 0; mAmount = null; mDate = Fmt.Today; mAlreadySaved = false; mNote = null; formError = null;
+        moveSheet = true;
+    }
+
+    private async Task SaveMove()
+    {
+        formError = null;
+        if (mFrom == 0 || mTo == 0) { formError = "Choose where the money comes from and goes to."; return; }
+        if (mAmount is not > 0) { formError = "Enter an amount above zero."; return; }
+        busy = true;
+        try
+        {
+            await Api.MoveMoney(mFrom, mTo, mAmount.Value, mDate, mAlreadySaved, mNote);
+            CloseSheets();
+            Toast.Show($"Moved {Fmt.Money(mAmount.Value)}");
+            await Load();
+        }
+        catch (ApiException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+
+    // ---- Planned transfers ----
+    private void OpenPlan(PlannedDto? p)
+    {
+        editPlan = p;
+        plName = p?.Name ?? ""; plAmount = p is null ? null : Fmt.Trim(p.Amount);
+        plFrom = p?.FromAccountId ?? 0; plTo = p?.ToAccountId ?? 0;
+        plStart = p?.StartsOn ?? new DateOnly(Fmt.Today.Year, Fmt.Today.Month, 1).AddMonths(1);
+        plActive = p?.IsActive ?? true; formError = null;
+        planSheet = true;
+    }
+
+    private async Task SavePlan()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(plName)) { formError = "Give it a name."; return; }
+        if (plAmount is not > 0) { formError = "Enter an amount above zero."; return; }
+        if (plFrom == 0 || plTo == 0) { formError = "Choose where the money comes from and goes to."; return; }
+        var body = new PlannedSave(plName.Trim(), plAmount.Value, plFrom, plTo, plStart ?? Fmt.Today, plActive);
+        busy = true;
+        try
+        {
+            planned = editPlan is null ? await Api.AddPlanned(body) : await Api.UpdatePlanned(editPlan.Id, body);
+            CloseSheets();
+            Toast.Show("Plan saved");
+        }
+        catch (ApiException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task RemovePlan()
+    {
+        if (editPlan is null) return;
+        busy = true;
+        try
+        {
+            await Api.DeletePlanned(editPlan.Id);
+            planned = await Api.Planned();
+            CloseSheets();
+            Toast.Show("Plan removed. Moves already ticked off stay.");
+        }
+        catch (ApiException e) { formError = e.Message; }
+        finally { busy = false; }
+    }
+}

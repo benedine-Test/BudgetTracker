@@ -1,6 +1,7 @@
 @page "/"
 @inject Api Api
 @inject NavigationManager Nav
+@inject Toast Toast
 
 <PageTitle>Budget</PageTitle>
 
@@ -52,6 +53,30 @@ else
             <p class="label">@(s.LeftToSpend < 0 ? "Over your take-home pay by" : "Left from this pay")</p>
             <p class="big @(s.LeftToSpend < 0 ? "neg" : "")">@Fmt.Money(Math.Abs(s.LeftToSpend))</p>
             <p class="sub">@Fmt.Money(s.TotalSpent) used of @Fmt.Money(s.TakeHomeIncome)</p>
+        </section>
+    }
+
+    @if (IsCurrent && reminders.Count > 0)
+    {
+        <section class="card soft-butter" aria-label="Reminders">
+            <h2>🔔 Reminders</h2>
+            @foreach (var r in reminders)
+            {
+                <div class="reminder @(r.Soon ? "soon" : "")">
+                    <span class="row-main">
+                        <span>@r.Text</span>
+                        <span class="muted small">@DueLine(r)</span>
+                    </span>
+                    @if (r.ReminderId is int rid)
+                    {
+                        <button type="button" class="btn small nowrap" disabled="@ticking" @onclick="() => ReminderDone(rid)">Done</button>
+                    }
+                    else
+                    {
+                        <a class="btn small nowrap" href="savings">Open</a>
+                    }
+                </div>
+            }
         </section>
     }
 
@@ -135,6 +160,38 @@ else
             </a>
         }
     </section>
+
+    @if (plan is not null && plan.Items.Count > 0)
+    {
+        <section class="card soft-mint" aria-label="Planned savings">
+            <div class="bucket-head">
+                <h2>💚 Planned savings</h2>
+                <span class="num">@Fmt.Money(plan.Done) of @Fmt.Money(plan.Planned)</span>
+            </div>
+            @foreach (var i in plan.Items)
+            {
+                <label class="check plan-item">
+                    <input type="checkbox" checked="@i.Done" disabled="@(ticking || IsFuture)" @onchange="() => Toggle(i)" />
+                    <span class="row-main">
+                        <span>@i.Name · <span class="num">@Fmt.Money(i.Amount)</span></span>
+                        <span class="muted small">@PlanLine(i)</span>
+                    </span>
+                </label>
+            }
+            <p class="hint">Ticking one records the move, so it counts in Savings and the pocket's balance. Never in Needs or Wants.</p>
+        </section>
+    }
+
+    @if (IsCurrent)
+    {
+        <a class="card banner soft-link" href="savings">
+            <span>
+                <strong>🛟 Safety Fund</strong>
+                <span class="muted">Pockets, interest and how close you are to the target</span>
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5.4 6.6 6.6L9 18.6l1.4 1.4 8-8-8-8z" /></svg>
+        </a>
+    }
 
     @if (IsCurrent && goals is not null)
     {
@@ -230,6 +287,9 @@ else
     private List<CardStatementDto> statements = [];
     private SubscriptionsDto? subs;
     private List<GoalProgress>? goals;
+    private List<ReminderDto> reminders = [];
+    private PlannedPeriodDto? plan;
+    private bool ticking;
     private DateOnly? date;
     private string? error;
     private bool showIncome;
@@ -271,6 +331,56 @@ else
         catch (ApiException) { subs = null; }
         try { goals = await Api.Goals(); }
         catch (ApiException) { goals = null; }
+        try { reminders = await Api.Reminders(); }
+        catch (ApiException) { reminders = []; }
+        try { plan = await Api.PlannedFor(s.PeriodStart); }
+        catch (ApiException) { plan = null; }
+    }
+
+    private async Task Toggle(PlannedItemDto i)
+    {
+        if (s is null) return;
+        ticking = true;
+        try
+        {
+            plan = i.Done ? await Api.Untick(i.Id, s.PeriodStart) : await Api.Tick(i.Id, s.PeriodStart);
+            s = await Api.Summary(date);
+            reminders = await Api.Reminders();
+        }
+        catch (ApiException e)
+        {
+            Toast.Show(e.Message, true);
+            try { plan = await Api.PlannedFor(s.PeriodStart); } catch (ApiException) { }
+        }
+        finally { ticking = false; }
+    }
+
+    private async Task ReminderDone(int id)
+    {
+        ticking = true;
+        try
+        {
+            reminders = await Api.ReminderDone(id);
+            Toast.Show("Done. See you in a few months.");
+        }
+        catch (ApiException e) { Toast.Show(e.Message, true); }
+        finally { ticking = false; }
+    }
+
+    private static string PlanLine(PlannedItemDto i) =>
+        $"{i.From ?? "?"} → {i.To ?? "?"}" +
+        (i.DoneOn is { } d ? $" · done {d.ToString("d MMM", System.Globalization.CultureInfo.InvariantCulture)}" : "");
+
+    private static string DueLine(ReminderDto r)
+    {
+        var due = r.Due.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        return r.DaysLeft switch
+        {
+            var d when d < 0 => $"Was due {due} · {-d} {(d == -1 ? "day" : "days")} ago",
+            0 => $"Due today ({due})",
+            1 => $"Due tomorrow ({due})",
+            _ => $"{due} · in {r.DaysLeft} days"
+        };
     }
 
     private Task Go(DateOnly day)

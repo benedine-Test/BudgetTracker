@@ -33,7 +33,37 @@ public record OwedList(decimal Total, List<OwedDto> Bills);
 
 public record AccountDto(int Id, string Name, string Kind, string Currency, decimal Balance,
     decimal AnchorBalance, DateTimeOffset BalanceAsOf, string? CardNames, bool IsArchived, DateTimeOffset? LastImportAt,
-    int? StatementDay = null);
+    int? StatementDay = null, string? Pocket = null);
+
+// ---- Savings pockets and the Safety Fund ----
+
+/// <summary>Type: "Main" | "Saving" | "Boost". Purpose: "SafetyFund" | "Travel" | "Other". Interest figures are estimates.</summary>
+public record PocketDto(int AccountId, string Name, string Bank, string Type, string Purpose, decimal Balance, bool IsArchived,
+    decimal InterestRatePct, decimal? BonusRatePct, decimal TotalRatePct,
+    DateOnly? StartDate, int? TermMonths, DateOnly? MaturityDate, decimal? PromoCashback, decimal? GoalAmount,
+    bool Locked, int? DaysToMaturity, decimal EarnedSoFar, decimal? InterestAtMaturity, decimal? TotalAtMaturity,
+    decimal YearAtThisRate);
+
+public record SafetyFundDto(string Currency, decimal EmergencyTarget, decimal? ParentsTarget, decimal Target,
+    decimal Ready, decimal Locked, decimal Total, decimal PercentOfTarget,
+    List<PocketDto> Safety, List<PocketDto> Travel, List<PocketDto> Other);
+
+public record PocketSave(string Name, string? Bank, string Type, string Purpose, decimal InterestRatePct,
+    decimal? BonusRatePct, DateOnly? StartDate, int? TermMonths, DateOnly? MaturityDate,
+    decimal? PromoCashback, decimal? GoalAmount, decimal? OpeningBalance = null, int? FundFromAccountId = null,
+    decimal? FundAmount = null, bool FundAlreadySaved = true);
+
+/// <summary>Kind: "maturity" | "repeat".</summary>
+public record ReminderDto(string Kind, string Text, DateOnly Due, int DaysLeft, bool Soon, int? ReminderId, int? AccountId);
+
+public record PlannedDto(int Id, string Name, decimal Amount, int FromAccountId, string? From, int ToAccountId, string? To,
+    DateOnly StartsOn, bool IsActive);
+
+public record PlannedSave(string Name, decimal Amount, int FromAccountId, int ToAccountId, DateOnly StartsOn, bool IsActive = true);
+
+public record PlannedItemDto(int Id, string Name, decimal Amount, string? From, string? To, bool Done, int? TransactionId, DateOnly? DoneOn);
+
+public record PlannedPeriodDto(DateOnly PeriodStart, DateOnly PeriodEndExclusive, decimal Planned, decimal Done, List<PlannedItemDto> Items);
 
 public record CardStatementDto(int AccountId, string Name, int StatementDay,
     DateOnly CycleStart, DateOnly ClosesOn, int DaysToClose, decimal ChargedSoFar, int Count,
@@ -406,6 +436,54 @@ public class Api(HttpClient http)
             throw new ApiException("Can't reach the server. Check your connection and try again.");
         }
     }
+
+    // ---- Savings pockets and the Safety Fund ----
+    public Task<SafetyFundDto> SafetyFund() => Get<SafetyFundDto>("api/savings");
+
+    public async Task<SafetyFundDto> SaveTargets(decimal emergencyTarget, decimal? parentsTarget)
+    {
+        using var r = await Send(HttpMethod.Put, "api/savings/targets", new { emergencyTarget, parentsTarget });
+        return (await r.Content.ReadFromJsonAsync<SafetyFundDto>(Json))!;
+    }
+
+    public Task<PocketDto> AddPocket(PocketSave p) => Post<PocketDto>("api/savings/pockets", p);
+
+    public async Task<PocketDto> UpdatePocket(int accountId, PocketSave p)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/savings/pockets/{accountId}", p);
+        return (await r.Content.ReadFromJsonAsync<PocketDto>(Json))!;
+    }
+
+    public Task MoveMoney(int fromAccountId, int toAccountId, decimal amount, DateOnly? date, bool alreadySaved, string? note) =>
+        Send(HttpMethod.Post, "api/savings/transfers", new { fromAccountId, toAccountId, amount, date, alreadySaved, note });
+
+    public Task<List<PlannedDto>> Planned() => Get<List<PlannedDto>>("api/savings/planned");
+
+    public Task<List<PlannedDto>> AddPlanned(PlannedSave p) => Post<List<PlannedDto>>("api/savings/planned", p);
+
+    public async Task<List<PlannedDto>> UpdatePlanned(int id, PlannedSave p)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/savings/planned/{id}", p);
+        return (await r.Content.ReadFromJsonAsync<List<PlannedDto>>(Json))!;
+    }
+
+    public Task DeletePlanned(int id) => Send(HttpMethod.Delete, $"api/savings/planned/{id}");
+
+    public Task<PlannedPeriodDto> PlannedFor(DateOnly date) =>
+        Get<PlannedPeriodDto>($"api/savings/planned/period?date={Fmt.Iso(date)}");
+
+    public Task<PlannedPeriodDto> Tick(int id, DateOnly periodDate) =>
+        Post<PlannedPeriodDto>($"api/savings/planned/{id}/tick", new { periodDate });
+
+    public async Task<PlannedPeriodDto> Untick(int id, DateOnly periodDate)
+    {
+        using var r = await Send(HttpMethod.Delete, $"api/savings/planned/{id}/tick?date={Fmt.Iso(periodDate)}");
+        return (await r.Content.ReadFromJsonAsync<PlannedPeriodDto>(Json))!;
+    }
+
+    public Task<List<ReminderDto>> Reminders() => Get<List<ReminderDto>>("api/savings/reminders");
+
+    public Task<List<ReminderDto>> ReminderDone(int id) => Post<List<ReminderDto>>($"api/savings/reminders/{id}/done", new { });
 
     // ---- Plumbing ----
     private async Task<T> Get<T>(string url)

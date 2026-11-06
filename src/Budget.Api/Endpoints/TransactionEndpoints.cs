@@ -220,6 +220,13 @@ public static class TransactionEndpoints
                 if (billShare + others + newAmount > bill.Amount)
                     return Results.BadRequest(new { message = "That's more than is owed on the bill it pays back. Unlink it first." });
             }
+            // A move between your own accounts is two entries; keep the other side in step.
+            if (t.PairId is int pairId && (newAmount != t.Amount || newWhen != t.OccurredAtUtc)
+                && await db.Transactions.FirstOrDefaultAsync(x => x.Id == pairId, ct) is { } other)
+            {
+                other.Amount = newAmount;
+                other.OccurredAtUtc = newWhen;
+            }
             t.Amount = newAmount;
             t.OccurredAtUtc = newWhen;
             if (body.Merchant is not null)
@@ -351,7 +358,8 @@ public static class TransactionEndpoints
             // A shared bill's repayments stay (the money did come in), as plain income.
             await SharedBills.DetachRepaymentsAsync(db, [t.Id], ct);
 
-            db.Transactions.Remove(t);
+            // A move between your own accounts goes with its other side (and any planned-transfer tick).
+            await SavingsTransfers.RemovePairAsync(db, t, ct);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });

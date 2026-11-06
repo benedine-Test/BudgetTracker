@@ -442,3 +442,53 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 .goal-recent .dot.miss { background: var(--danger-bg); color: var(--danger); }
 .goal-actions, .goal-edit { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .goal-edit input { flex: 1 1 120px; width: auto; min-height: 38px; }
+
+/* ---- Safety Fund and savings pockets ---- */
+/* Soft pastel tints, mixed from the theme tokens so they follow light and dark mode. */
+:root { --ready: var(--savings); --locked: #7d6bd6; --travel: #e08a5c; --butter: #d9a520; --sky: #4a90c8; }
+@media (prefers-color-scheme: dark) {
+    :root { --locked: #b3a6f5; --travel: #f2ad86; --butter: #f0cc6b; --sky: #8ec3ee; }
+}
+.soft-mint { background: color-mix(in srgb, var(--ready) 9%, var(--surface)); }
+.soft-lilac { background: color-mix(in srgb, var(--locked) 10%, var(--surface)); }
+.soft-peach { background: color-mix(in srgb, var(--travel) 10%, var(--surface)); }
+.soft-butter { background: color-mix(in srgb, var(--butter) 12%, var(--surface)); }
+.soft-sky { background: color-mix(in srgb, var(--sky) 9%, var(--surface)); }
+.soft-link { background: color-mix(in srgb, var(--ready) 9%, var(--surface)); color: var(--text); box-shadow: var(--shadow); }
+.soft-link .muted { color: var(--muted); opacity: 1; }
+
+.fund-bar { height: 16px; margin-top: 14px; background: color-mix(in srgb, var(--track) 80%, var(--surface)); }
+.slice.ready, .swatch.ready { background: var(--ready); }
+.slice.locked, .swatch.locked { background: var(--locked); }
+.swatch.togo { background: var(--track); border: 1px solid var(--line); }
+.fund-legend { margin-top: 12px; }
+.fund-legend li { grid-template-columns: 12px 1fr auto; }
+
+.facts.tight { margin-top: 4px; font-size: 14px; }
+.facts.tight dt, .facts.tight dd { padding: 7px 0; }
+
+.pocket { gap: 8px; }
+.pocket h2 { font-size: 17px; }
+.pocket-bal { font-size: 18px; font-weight: 700; }
+.pocket .tag { margin-right: 4px; }
+.soft-mint-tag { background: color-mix(in srgb, var(--ready) 18%, transparent); color: var(--ready); }
+.soft-lilac-tag { background: color-mix(in srgb, var(--locked) 20%, transparent); color: var(--locked); }
+.soft-peach-tag { background: color-mix(in srgb, var(--travel) 20%, transparent); color: var(--travel); }
+.pocket-when { font-size: 14px; }
+.soft-lilac .bar > span { background: var(--locked); }
+.soft-peach .bar > span { background: var(--travel); }
+.soft-mint .bar > span { background: var(--ready); }
+.edit-link { align-self: flex-start; margin: 2px 0 0; }
+.group-title.travel::before { background: var(--travel); }
+
+.reminder {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+    line-height: 1.4;
+}
+.reminder.soon { border-left: 4px solid var(--butter); }
+.reminder .btn { flex: none; }
+
+.plan-item { align-items: flex-start; margin: 4px 0; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.plan-item input { margin-top: 2px; accent-color: var(--ready); }

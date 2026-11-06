@@ -109,6 +109,9 @@ public static class AccountEndpoints
             var a = await db.Accounts.FindAsync([id], ct);
             if (a is null) return Results.NotFound();
             await db.Transactions.Where(t => t.AccountId == id).ExecuteUpdateAsync(s => s.SetProperty(t => t.AccountId, (int?)null), ct);
+            // A savings pocket's details and reminders go with it.
+            db.PocketTerms.RemoveRange(await db.PocketTerms.Where(p => p.AccountId == id).ToListAsync(ct));
+            db.Reminders.RemoveRange(await db.Reminders.Where(r => r.AccountId == id).ToListAsync(ct));
             db.Accounts.Remove(a);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();

@@ -1,0 +1,90 @@
+@* One savings pocket on the Safety Fund screen: balance, rate, dates and estimated interest. *@
+
+<section class="card pocket @Tint">
+    <div class="bucket-head">
+        <h2>@Icon @Pocket.Name</h2>
+        <span class="num pocket-bal">@Fmt.Money(Pocket.Balance)</span>
+    </div>
+    <p class="muted small">
+        <span class="tag @Tint-tag">@TypeLabel</span>
+        @Pocket.Bank · @RateLine
+    </p>
+
+    @if (Pocket.Type == "Boost" && Pocket.MaturityDate is { } m)
+    {
+        <p class="pocket-when">
+            @(Pocket.Locked ? "Locked until" : "Matured on") <b>@m.ToString("d MMM yyyy", Inv)</b>
+            @if (Pocket.Locked && Pocket.DaysToMaturity is int d)
+            {
+                <span class="muted"> · @d @(d == 1 ? "day" : "days") to go</span>
+            }
+        </p>
+        @if (Pocket.StartDate is { } s && Pocket.Locked)
+        {
+            var total = Math.Max(1, m.DayNumber - s.DayNumber);
+            var done = Math.Clamp(Fmt.Today.DayNumber - s.DayNumber, 0, total);
+            <div class="bar thin" aria-hidden="true"><span style="width:@Pct(done * 100m / total)"></span></div>
+        }
+    }
+
+    @if (Pocket.GoalAmount is { } goal && goal > 0)
+    {
+        <div class="cat-head small-gap">
+            <span class="muted">Goal</span>
+            <span class="num">@Fmt.Money(Pocket.Balance) / @Fmt.Money(goal)</span>
+        </div>
+        <div class="bar thin" role="img" aria-label="@($"{Fmt.Percent(Math.Round(Pocket.Balance / goal * 100))} of the goal")">
+            <span style="width:@Pct(Pocket.Balance / goal * 100)"></span>
+        </div>
+    }
+
+    <dl class="facts tight">
+        <dt>Interest so far</dt>
+        <dd>@Fmt.Money(Pocket.EarnedSoFar)</dd>
+        @if (Pocket.InterestAtMaturity is { } atEnd)
+        {
+            <dt>Interest at maturity</dt>
+            <dd>@Fmt.Money(atEnd)</dd>
+            @if (Pocket.PromoCashback is > 0)
+            {
+                <dt>Promo cashback</dt>
+                <dd>@Fmt.Money(Pocket.PromoCashback.Value)</dd>
+            }
+            <dt>Back at maturity</dt>
+            <dd>@Fmt.Money(Pocket.TotalAtMaturity ?? Pocket.Balance)</dd>
+        }
+        else
+        {
+            <dt>A year at this rate</dt>
+            <dd>@Fmt.Money(Pocket.YearAtThisRate)</dd>
+        }
+    </dl>
+
+    <button type="button" class="link edit-link" @onclick="OnEdit">Edit details</button>
+</section>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    [Parameter, EditorRequired] public PocketDto Pocket { get; set; } = default!;
+    [Parameter] public EventCallback OnEdit { get; set; }
+
+    private string Tint => Pocket.Purpose == "Travel" ? "soft-peach" : Pocket.Locked ? "soft-lilac" : "soft-mint";
+
+    private string Icon => Pocket.Purpose == "Travel" ? "✈️" : Pocket.Type == "Boost" ? (Pocket.Locked ? "🔒" : "🔓") : Pocket.Type == "Main" ? "🏦" : "🌿";
+
+    private string TypeLabel => Pocket.Type switch
+    {
+        "Boost" => "Boost Pocket",
+        "Saving" => "Saving Pocket",
+        _ => "Main Account"
+    };
+
+    private string RateLine => Pocket.BonusRatePct is > 0
+        ? $"{Rate(Pocket.TotalRatePct)} a year ({Rate(Pocket.InterestRatePct)} + {Rate(Pocket.BonusRatePct.Value)} bonus)"
+        : $"{Rate(Pocket.TotalRatePct)} a year";
+
+    private static string Rate(decimal pct) => pct.ToString("0.###", Inv) + "%";
+
+    private static string Pct(decimal value) => Math.Clamp(value, 0, 100).ToString("0.#", Inv) + "%";
+}
