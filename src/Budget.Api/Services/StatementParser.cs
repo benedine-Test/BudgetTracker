@@ -70,7 +70,7 @@ public static partial class StatementParser
                         "Check it's the transaction history CSV, not a summary.");
 
         var headers = lines[headerIndex].Select(h => h.Trim()).ToList();
-        var dataLines = lines.Skip(headerIndex + 1).ToList();
+        var dataLines = DropRepeatedRuns(lines.Skip(headerIndex + 1).ToList(), out var repeated);
         var map = DetectColumns(headers, dataLines, overrides);
 
         if (map.Date is null) return Fail("Couldn't tell which column is the date.", headers, map);
@@ -96,6 +96,10 @@ public static partial class StatementParser
 
         var rows = new List<StatementRow>();
         var skipped = 0;
+        // Card downloads (UOB) list unbilled charges first, then each past statement, each opening
+        // with a "Previous Balance" line. Section 0 is the unbilled part, 1 the latest statement.
+        var section = 0;
+        var sectioned = new List<(int Section, DateOnly Date, decimal Signed)>();
         for (var i = 0; i < dataLines.Count; i++)
         {
             var cells = dataLines[i];
@@ -103,7 +107,12 @@ public static partial class StatementParser
             if (cells.All(string.IsNullOrWhiteSpace)) continue;
 
             // Summary lines ("Balance brought forward", totals) have no date: not a transaction.
-            if (!TryParseDate(Cell(dateCol), out var date)) { skipped++; continue; }
+            if (!TryParseDate(Cell(dateCol), out var date))
+            {
+                if (cells.Any(c => Key(c) == "previous balance")) section++;
+                skipped++;
+                continue;
+            }
             if (hasPosted && Cell(postingCol).Length == 0) { pending++; skipped++; continue; }
 
             decimal amount;
@@ -120,6 +129,7 @@ public static partial class StatementParser
             {
                 if (!TryParseMoney(Cell(amountCol), out var signed, out var marker) || signed == 0) { skipped++; continue; }
                 amount = Math.Abs(signed);
+                if (marker is null) sectioned.Add((section, date, signed));
                 var dir = Cell(dirCol).ToUpperInvariant();
                 if (dir.StartsWith('C')) isCredit = true;
                 else if (dir.StartsWith('D')) isCredit = false;
@@ -143,13 +153,85 @@ public static partial class StatementParser
         var newestFirst = rows[0].Date > rows[^1].Date;
         var latest = newestFirst ? rows[0] : rows[^1];
         var withBalance = (newestFirst ? rows : Enumerable.Reverse(rows)).FirstOrDefault(r => r.Balance is not null && r.Date == latest.Date);
+        decimal? closingBalance = withBalance?.Balance;
+        DateOnly? closingDate = withBalance?.Date;
 
-        return new ParsedStatement(headers, map, rows, skipped, withBalance?.Balance, withBalance?.Date, null)
+        // No balance column, but a "Statement Balance:" line above the headings (UOB cards): that's
+        // what was owed when the latest statement closed. Add what has posted since (the unbilled
+        // lines above the first "Previous Balance") to get what's owed now, as the bank's app shows.
+        if (closingBalance is null && section > 0 && StatementBalanceLine(lines.Take(headerIndex)) is { } statementBalance)
         {
-            Warning = pending == 0 ? null
-                : $"Left out {pending} pending charge{(pending == 1 ? "" : "s")}. They'll come in with your next download once they've posted."
+            var counted = sectioned.Where(s => s.Section <= 1).ToList();
+            if (counted.Count > 0)
+            {
+                closingBalance = statementBalance + sectioned.Where(s => s.Section == 0).Sum(s => s.Signed);
+                closingDate = counted.Max(s => s.Date);
+            }
+        }
+
+        var warnings = new List<string>();
+        if (pending > 0)
+            warnings.Add($"Left out {pending} pending charge{(pending == 1 ? "" : "s")}. They'll come in with your next download once they've posted.");
+        if (repeated > 0)
+            warnings.Add($"The bank's file listed {repeated} line{(repeated == 1 ? "" : "s")} twice. Each was read once.");
+        return new ParsedStatement(headers, map, rows, skipped, closingBalance, closingDate, null)
+        {
+            Warning = warnings.Count == 0 ? null : string.Join(' ', warnings)
         };
     }
+
+    /// <summary>The amount on a "Statement Balance:" line in the lines above the headings, if any.</summary>
+    private static decimal? StatementBalanceLine(IEnumerable<List<string>> preamble)
+    {
+        foreach (var line in preamble)
+        {
+            var cells = line.Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
+            if (cells.Count >= 2 && Key(cells[0]) == "statement balance" && TryParseMoney(cells[1], out var value, out var marker))
+                return marker == "CR" ? -Math.Abs(value) : value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Some downloads repeat a whole run of lines (UOB's card history lists its unbilled and latest
+    /// statement lines twice). A run of at least <see cref="MinRepeatedRun"/> lines that exactly
+    /// matches an earlier run, without overlapping it, is a copy and is dropped. Two identical
+    /// lines on their own (two S$1.50 coffees) are kept: they're real.
+    /// </summary>
+    public static List<List<string>> DropRepeatedRuns(List<List<string>> lines, out int dropped)
+    {
+        var keys = lines.Select(l => string.Join('\u001f', l.Select(c => c.Trim()))).ToList();
+        var seenAt = new Dictionary<string, List<int>>();
+        var kept = new List<List<string>>(lines.Count);
+        dropped = 0;
+        var i = 0;
+        while (i < keys.Count)
+        {
+            var run = 0;
+            if (keys[i].Replace("\u001f", "").Length > 0 && seenAt.TryGetValue(keys[i], out var earlier))
+            {
+                foreach (var e in earlier)
+                {
+                    var n = 0;
+                    while (i + n < keys.Count && e + n < i && keys[e + n] == keys[i + n]) n++;
+                    if (n >= MinRepeatedRun && n > run && keys.Skip(i).Take(n).Distinct().Count() > 1) run = n;
+                }
+            }
+            if (run > 0)
+            {
+                dropped += keys.Skip(i).Take(run).Count(k => k.Replace("\u001f", "").Length > 0);
+                i += run;
+                continue;
+            }
+            if (!seenAt.TryGetValue(keys[i], out var at)) seenAt[keys[i]] = at = [];
+            at.Add(i);
+            kept.Add(lines[i]);
+            i++;
+        }
+        return kept;
+    }
+
+    private const int MinRepeatedRun = 5;
 
     private static ParsedStatement Fail(string message, IReadOnlyList<string>? headers = null, ColumnMap? map = null) =>
         new(headers ?? [], map ?? new ColumnMap(), [], 0, null, null, message);

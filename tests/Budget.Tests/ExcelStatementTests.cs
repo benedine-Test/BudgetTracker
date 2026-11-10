@@ -147,6 +147,68 @@ public class ExcelStatementTests
     }
 
     [Fact]
+    public void Reads_a_UOB_card_file_that_lists_its_latest_lines_twice_once()
+    {
+        // UOB's "CC_TXN_History" repeats the unbilled and latest statement lines as one block.
+        object?[][] block =
+        [
+            ["10 Nov 2026", null, "BUS/MRT                  SINGAPORE   SG ", null, null, "SGD", 3.43],   // pending
+            ["05 Nov 2026", "06 Nov 2026", "Netflix.com              Los Gatos    SG\nRef No: 2429", null, null, "SGD", 22.98],
+            ["02 Nov 2026", "02 Nov 2026", "PAYMT THRU E-BANK/HOMEB/CYBERB (EP19)", null, null, "SGD", -8560.27],
+            ["01 Nov 2026", "03 Nov 2026", "GRAB* A-1                Singapore    SG\nRef No: 7477", null, null, "SGD", 12.0],
+            [null, null, "Previous Balance", null, null, "SGD", 7522.09],
+            ["12 Oct 2026", "12 Oct 2026", "INTERESTS", null, null, "SGD", 338.97],
+            ["10 Oct 2026", "12 Oct 2026", "ONE CARD ADDITIONAL REBATE", null, null, "SGD", -86.4],
+            ["05 Oct 2026", "06 Oct 2026", "Netflix.com              Los Gatos    SG\nRef No: 2428", null, null, "SGD", 22.98],
+        ];
+        var file = Xlsx([
+            [
+                ["United Overseas Bank Limited."],
+                ["Account Type:", "UOB ONE CARD"],
+                ["Statement Date:", "08 Jul 2026 To 10 Nov 2026"],
+                ["Statement Balance:", "8575.17", "SGD"],
+                [],
+                ["Transaction Date", "Posting Date", "Description", "Foreign Currency Type", "Transaction Amount(Foreign)", "Local Currency Type", "Transaction Amount(Local)"],
+                .. block,
+                .. block,
+                [null, null, "Previous Balance", null, null, "SGD", 4077.66],
+                ["06 Sep 2026", "07 Sep 2026", "NETFLIX.COM              SINGAPORE    SG\nRef No: 7477", null, null, "SGD", 22.98],
+            ]
+        ]);
+
+        var parsed = ExcelStatementReader.Read(file, null, positiveIsSpend: true);
+
+        Assert.Null(parsed.Problem);
+        Assert.Equal(3, parsed.Rows.Count(r => r.Description.StartsWith("Netflix", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(7, parsed.Rows.Count);
+        Assert.Contains("listed 8 lines twice", parsed.Warning);
+        // Owed now = last statement's balance + what has posted since: 8575.17 + 22.98 − 8560.27 + 12.
+        Assert.Equal(49.88m, parsed.ClosingBalance);
+        Assert.Equal(new DateOnly(2026, 11, 5), parsed.ClosingDate);
+    }
+
+    [Fact]
+    public void Keeps_identical_lines_that_are_real_purchases()
+    {
+        var lines = new List<List<string>>
+        {
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "01 Oct 2026", "KOPI", "1.50" },
+            new() { "02 Oct 2026", "BUS", "2.00" },
+            new() { "02 Oct 2026", "BUS", "2.00" },
+        };
+
+        var kept = StatementParser.DropRepeatedRuns(lines, out var dropped);
+
+        Assert.Equal(0, dropped);
+        Assert.Equal(8, kept.Count);
+    }
+
+    [Fact]
     public void Reads_every_line_when_nothing_has_a_posting_date()
     {
         var file = Xlsx([
