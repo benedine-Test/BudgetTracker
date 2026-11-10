@@ -175,7 +175,7 @@ public class PayslipTests
     [Theory]
     [InlineData(3200, CpfAgeBand.UpTo55, 1480)]       // S$4,000 base (S$3,999 gives the same take-home and CPF)
     [InlineData(10400, CpfAgeBand.UpTo55, 2960)]      // S$12,000 base, capped at the ceiling
-    [InlineData(560, CpfAgeBand.UpTo55, 162)]         // S$648 base, in the phase-in band
+    [InlineData(560, CpfAgeBand.UpTo55, 199)]         // S$648 base, in the phase-in band: 17% × 648 + 0.6 × 148 = 198.96
     [InlineData(400, CpfAgeBand.UpTo55, 68)]          // no employee share: base = take-home, employer 17%
     [InlineData(4100, CpfAgeBand.Over55To60, 1700)]   // S$5,000 base at 18%
     [InlineData(5000, CpfAgeBand.NoCpf, 0)]
