@@ -20,6 +20,7 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
     public DbSet<PlannedTransfer> PlannedTransfers => Set<PlannedTransfer>();
     public DbSet<PlannedTransferTick> PlannedTransferTicks => Set<PlannedTransferTick>();
     public DbSet<Reminder> Reminders => Set<Reminder>();
+    public DbSet<TaxPlan> TaxPlans => Set<TaxPlan>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -140,5 +141,20 @@ public class BudgetDbContext(DbContextOptions<BudgetDbContext> options) : DbCont
             e.HasIndex(t => new { t.PlannedTransferId, t.PeriodStart }).IsUnique());
 
         b.Entity<Reminder>(e => e.Property(r => r.Text).HasMaxLength(300));
+
+        b.Entity<TaxPlan>(e =>
+        {
+            e.HasIndex(t => t.Year).IsUnique();
+            e.Property(t => t.EmploymentIncomeOverride).HasPrecision(18, 2);
+            e.Property(t => t.ExpectedMonthlyPay).HasPrecision(18, 2);
+            e.Property(t => t.ExpectedBonus).HasPrecision(18, 2);
+            e.Property(t => t.OtherIncome).HasPrecision(18, 2);
+            e.Property(t => t.SrsContributed).HasPrecision(18, 2);
+            e.Property(t => t.CpfTopUpSelf).HasPrecision(18, 2);
+            e.Property(t => t.CpfTopUpFamily).HasPrecision(18, 2);
+            e.Property(t => t.Donations).HasPrecision(18, 2);
+            e.Property(t => t.NsmanRelief).HasPrecision(18, 2);
+            e.Property(t => t.OtherReliefs).HasPrecision(18, 2);
+        });
     }
 }

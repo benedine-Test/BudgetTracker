@@ -30,6 +30,7 @@ A Blazor WebAssembly app served by the same site as the API, so **publishing `Bu
 - **Settings** — record salary, change the split and payday, move categories between buckets, export CSV.
 - **Goals** (linked from Budget) — spending limits per pay period on a category or a whole bucket, and amounts to save. Each shows how this pay period is going and whether it was kept in the last three. **Get ideas** asks the AI helper to suggest goals from your own spending; tap **Save goal** on the ones you want.
 - **Safety Fund** (linked from Budget and Accounts) — savings pockets such as GXS Bank's Main Account, Saving Pockets and Boost Pockets, the Safety Fund target (emergency fund + an optional amount for parents), a bar split into *Ready cash* and *Locked*, estimated interest per pocket, a separate Travel pocket with its own goal, and moves to make each payday. See *Safety Fund and savings pockets* below.
+- **Income tax** (linked from Budget and Settings) — this year's estimated Singapore income tax, worked out from your salary entries, and what would lower it before 31 Dec, each with the exact saving and its catch. See *Income tax* below.
 - **Ask** — type a question about your money ("Can I send my parents $400 a month?") and get an answer worked out from your own data. See *Ask (AI helper)* below.
 
 **Updating the live site:** in Visual Studio, right-click **Budget.Api → Publish → Publish**. Existing data and settings in Azure are kept.
@@ -55,6 +56,18 @@ The **Ask** tab sends your question to Claude (Anthropic's AI) with a set of **r
 - **Cost:** you pay Anthropic per question (usually a few cents; more for questions that need many lookups). Each question is capped at 8 lookup rounds.
 - Goal endpoints: `GET/POST /api/goals`, `PUT/DELETE /api/goals/{id}`.
 - Endpoints: `GET /api/ask/status`, `POST /api/ask` with `{ "question": "...", "history": [{ "role": "user"|"assistant", "text": "..." }] }`.
+
+## Income tax
+
+An estimate of the tax on a calendar year's income (2026 income = YA2027, filed by 18 April 2027), on Singapore **resident** rates from YA2024.
+
+- **Income** comes from the year's *Salary* entries, worked back from take-home pay to pay before CPF, plus the months still to come at your latest pay (or the monthly pay you type). Add any bonus/AWS still to come; its CPF is counted only up to the S$102,000 annual ceiling. Once your IR8A arrives, type the year's employment income to use that instead.
+- **Reliefs:** earned income relief (by age, from your date of birth on Profile), CPF relief on your own CPF, SRS, CPF cash top-ups (self and family), parent relief, NSman and any others you type, all within the S$80,000 cap. Donations to IPCs are deducted at 250% for gifts in 2026.
+- **Ways to pay less:** SRS, CPF top-ups, parent relief and donations, with the room left, the saving if you use it all (two full estimates compared, so the cap and band edges are counted) and the downside. Nothing is suggested when you'd pay no tax.
+- **Rebates:** only YA2024 and YA2025 rebates are built in. For later years none is counted, so the estimate errs high.
+- Not covered: non-residents, self-employment, rental expense rules, spouse/child reliefs (type them under *Other reliefs*).
+- The Ask tab can look the estimate up too ("how can I lower my tax?").
+- Endpoints: `GET /api/tax?year=2026`, `PUT /api/tax/{year}`.
 
 ## How the pieces fit
 

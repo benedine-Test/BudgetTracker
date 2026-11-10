@@ -123,7 +123,7 @@ public sealed class AskTests : IDisposable
         Assert.Equal("claude-opus-5-5", root.GetProperty("model").GetString());
         Assert.Equal("default", root.GetProperty("fallbacks").GetString());
         Assert.Equal("medium", root.GetProperty("output_config").GetProperty("effort").GetString());
-        Assert.Equal(9, root.GetProperty("tools").GetArrayLength());
+        Assert.Equal(10, root.GetProperty("tools").GetArrayLength());
         var msgs = root.GetProperty("messages");
         Assert.Equal(3, msgs.GetArrayLength());
         Assert.Contains("$400", msgs[2].GetProperty("content").ToString());

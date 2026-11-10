@@ -425,3 +425,33 @@ public class Reminder
     public int? AccountId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
+
+/// <summary>
+/// What you've told the app about one income year's tax: the things it can't see in your entries.
+/// One row per calendar year of income (2026 income = YA2027). Salary comes from your entries unless
+/// <see cref="EmploymentIncomeOverride"/> is set (e.g. from the IR8A once your employer sends it).
+/// </summary>
+public class TaxPlan
+{
+    public int Id { get; set; }
+    public int Year { get; set; }
+    /// <summary>The year's employment income before CPF, typed in. Null = worked out from salary entries.</summary>
+    public decimal? EmploymentIncomeOverride { get; set; }
+    /// <summary>Monthly base pay for the months not paid yet. Null = the same as the latest salary.</summary>
+    public decimal? ExpectedMonthlyPay { get; set; }
+    /// <summary>Bonus and AWS still to come this year, before CPF.</summary>
+    public decimal ExpectedBonus { get; set; }
+    /// <summary>Rent, freelance and other taxable income, after expenses.</summary>
+    public decimal OtherIncome { get; set; }
+    public decimal SrsContributed { get; set; }
+    public decimal CpfTopUpSelf { get; set; }
+    public decimal CpfTopUpFamily { get; set; }
+    public decimal Donations { get; set; }
+    public int ParentsLivingWith { get; set; }
+    public int ParentsNotLivingWith { get; set; }
+    public decimal NsmanRelief { get; set; }
+    public decimal OtherReliefs { get; set; }
+    /// <summary>Not a citizen or PR: no CPF, higher SRS cap.</summary>
+    public bool Foreigner { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+}

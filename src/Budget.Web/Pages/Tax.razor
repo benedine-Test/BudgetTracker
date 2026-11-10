@@ -1,0 +1,321 @@
+@page "/tax"
+@inject Api Api
+@inject Toast Toast
+
+<PageTitle>Income tax</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Income tax</h1>
+        <div class="sub"><a href="">‹ Budget</a> · <a href="ask">Ask about it</a></div>
+    </div>
+    <div class="chips" role="group" aria-label="Income year">
+        @foreach (var y in new[] { Fmt.Today.Year - 1, Fmt.Today.Year })
+        {
+            <button type="button" class="chip @(y == year ? "on" : "")" aria-pressed="@(y == year)" @onclick="() => Pick(y)">@y</button>
+        }
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (v is null)
+{
+    <Loading />
+}
+else
+{
+    var r = v.Result;
+
+    <section class="card hero soft-lilac">
+        <p class="label">Estimated tax on @v.Year income · YA@(v.AssessmentYear)</p>
+        <p class="big">@Fmt.Money(r.Tax)</p>
+        <p class="sub">
+            @if (r.Tax > 0)
+            {
+                <text>@Fmt.Percent(r.EffectiveRatePct) of your income · each extra S$1,000 of relief saves @Fmt.Money(r.MarginalRatePct * 10m)</text>
+            }
+            else
+            {
+                <text>Nothing to pay on these figures</text>
+            }
+        </p>
+        <div class="tax-dates">
+            @if (v.DaysToAct >= 0)
+            {
+                <span class="tax-pill @(v.DaysToAct <= 45 ? "soon" : "")">⏳ @v.DaysToAct days left to act · by @Day(v.ActBy)</span>
+            }
+            else
+            {
+                <span class="tax-pill">🔒 @v.Year is closed: nothing new counts</span>
+            }
+            <span class="tax-pill">🗂️ File by @Day(v.FileBy)</span>
+            @if (r.Tax > 0)
+            {
+                <span class="tax-pill">📅 On GIRO ≈ @Fmt.Money(v.GiroMonthly)/month × 12</span>
+            }
+        </div>
+    </section>
+
+    @foreach (var note in v.Notes)
+    {
+        <section class="card soft-butter tax-note"><p>💬 @note</p></section>
+    }
+
+    @if (v.DaysToAct >= 0)
+    {
+        <h2 class="group-title">💡 Ways to pay less, before 31 Dec</h2>
+        @if (v.Tips.Count == 0)
+        {
+            <section class="card empty">
+                <p>@(r.Tax > 0 ? "You've used every relief the app knows about. Nice." : "No tax to cut. Keep your money free.")</p>
+            </section>
+        }
+        @foreach (var (t, i) in v.Tips.Select((t, i) => (t, i)))
+        {
+            <section class="card tax-tip @TipTint(i)">
+                <div class="bucket-head">
+                    <h2>@TipIcon(t.Key) @t.Title</h2>
+                    <span class="tax-save">−@Fmt.Money(t.Saves)</span>
+                </div>
+                <p>@t.What</p>
+                @if (t.Room > 0 && t.SavesPer1000 > 0)
+                {
+                    <p class="muted small">Room left: @Fmt.Money(t.Room) · saves @Fmt.Money(t.SavesPer1000) per S$1,000</p>
+                }
+                <p class="tax-catch">⚠️ @t.Catch</p>
+            </section>
+        }
+    }
+
+    <section class="card">
+        <h2>🧮 How it's worked out</h2>
+        <dl class="facts tight">
+            @if (v.Income.FromOverride)
+            {
+                <dt>Employment income <span class="muted small">typed in</span></dt><dd>@Fmt.Money(v.Income.EmploymentIncome)</dd>
+            }
+            else
+            {
+                <dt>Salary so far <span class="muted small">@v.Income.SalaryEntries entries, before CPF</span></dt><dd>@Fmt.Money(v.Income.PaidSoFar)</dd>
+                @if (v.Income.MonthsLeft > 0)
+                {
+                    <dt>Still to come <span class="muted small">@v.Income.MonthsLeft × @Fmt.Money(v.Income.MonthlyPay)</span></dt><dd>@Fmt.Money(v.Income.StillToCome)</dd>
+                }
+                @if (v.Income.Bonus > 0)
+                {
+                    <dt>Bonus</dt><dd>@Fmt.Money(v.Income.Bonus)</dd>
+                }
+            }
+            @if (v.Plan.OtherIncome > 0)
+            {
+                <dt>Other income</dt><dd>@Fmt.Money(v.Plan.OtherIncome)</dd>
+            }
+            <dt><b>Total income</b></dt><dd><b>@Fmt.Money(r.TotalIncome)</b></dd>
+            @if (r.DonationDeduction > 0)
+            {
+                <dt>Donations deduction</dt><dd>−@Fmt.Money(r.DonationDeduction)</dd>
+            }
+            @foreach (var line in r.Reliefs)
+            {
+                <dt>@line.Name</dt><dd>−@Fmt.Money(line.Amount)</dd>
+            }
+            @if (r.ReliefsBeforeCap > r.ReliefsClaimed)
+            {
+                <dt>Over the S$80,000 relief cap</dt><dd>+@Fmt.Money(r.ReliefsBeforeCap - r.ReliefsClaimed)</dd>
+            }
+            <dt><b>Chargeable income</b></dt><dd><b>@Fmt.Money(r.ChargeableIncome)</b></dd>
+            <dt>Tax</dt><dd>@Fmt.Money(r.TaxBeforeRebate)</dd>
+            @if (r.Rebate > 0)
+            {
+                <dt>Rebate</dt><dd>−@Fmt.Money(r.Rebate)</dd>
+            }
+            <dt><b>To pay</b></dt><dd><b>@Fmt.Money(r.Tax)</b></dd>
+        </dl>
+        @if (r.RebateNote is not null)
+        {
+            <p class="hint">@r.RebateNote</p>
+        }
+    </section>
+
+    <section class="card soft-sky">
+        <h2>✏️ What the app can't see</h2>
+        <form @onsubmit="Save" @onsubmit:preventDefault>
+            <h3 class="tax-sub">Income</h3>
+            <label for="t-ir8a">Employment income for the year (S$) <span class="muted small">from your IR8A, once you have it</span></label>
+            <input id="t-ir8a" type="number" inputmode="decimal" min="0" step="1" placeholder="Blank = from your salary entries" @bind="employment" />
+            @if (employment is null or <= 0)
+            {
+                <div class="two">
+                    <div>
+                        <label for="t-month">Monthly base pay (S$)</label>
+                        <input id="t-month" type="number" inputmode="decimal" min="0" step="1" placeholder="@(v.Income.MonthlyPay > 0 ? Fmt.Trim(v.Income.MonthlyPay).ToString("0") : "")" @bind="monthly" />
+                    </div>
+                    <div>
+                        <label for="t-bonus">Bonus / AWS still to come</label>
+                        <input id="t-bonus" type="number" inputmode="decimal" min="0" step="1" @bind="bonus" />
+                    </div>
+                </div>
+            }
+            <label for="t-other">Other income after expenses <span class="muted small">rent, freelance</span></label>
+            <input id="t-other" type="number" inputmode="decimal" min="0" step="1" @bind="other" />
+
+            <h3 class="tax-sub">Done this year</h3>
+            <div class="two">
+                <div>
+                    <label for="t-srs">Paid into SRS</label>
+                    <input id="t-srs" type="number" inputmode="decimal" min="0" step="1" @bind="srs" />
+                </div>
+                <div>
+                    <label for="t-don">Charity donations</label>
+                    <input id="t-don" type="number" inputmode="decimal" min="0" step="1" @bind="donations" />
+                </div>
+            </div>
+            @if (!foreigner)
+            {
+                <div class="two">
+                    <div>
+                        <label for="t-cself">CPF top-up: me</label>
+                        <input id="t-cself" type="number" inputmode="decimal" min="0" step="1" @bind="topSelf" />
+                    </div>
+                    <div>
+                        <label for="t-cfam">CPF top-up: family</label>
+                        <input id="t-cfam" type="number" inputmode="decimal" min="0" step="1" @bind="topFamily" />
+                    </div>
+                </div>
+            }
+
+            <h3 class="tax-sub">Reliefs</h3>
+            <div class="two">
+                <div>
+                    <label for="t-pw">Parents living with me</label>
+                    <select id="t-pw" @bind="parentsWith"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select>
+                </div>
+                <div>
+                    <label for="t-pa">Parents living apart</label>
+                    <select id="t-pa" @bind="parentsApart"><option value="0">0</option><option value="1">1</option><option value="2">2</option></select>
+                </div>
+            </div>
+            <div class="two">
+                <div>
+                    <label for="t-ns">NSman relief</label>
+                    <input id="t-ns" type="number" inputmode="decimal" min="0" step="1" @bind="nsman" />
+                </div>
+                <div>
+                    <label for="t-or">Other reliefs</label>
+                    <input id="t-or" type="number" inputmode="decimal" min="0" step="1" @bind="otherReliefs" />
+                </div>
+            </div>
+            <label class="check"><input type="checkbox" @bind="foreigner" /> I'm not a Singapore citizen or PR</label>
+            @if (formError is not null)
+            {
+                <p class="field-error">@formError</p>
+            }
+            <button type="submit" class="btn primary block" disabled="@busy">@(busy ? "Working it out…" : "Save and recalculate")</button>
+        </form>
+        <p class="hint">Salary entries are counted before CPF, worked back from take-home pay. What you type here is kept on the server, separately for each year.</p>
+    </section>
+
+    <p class="hint center tax-disclaimer">An estimate on Singapore resident rates (YA2024 onward), not advice. IRAS works out the real bill from what your employer reports; check it in myTax Portal.</p>
+}
+
+@code {
+    private TaxView? v;
+    private string? error;
+    private string? formError;
+    private bool busy;
+    private int year = Fmt.Today.Year;
+
+    private decimal? employment, monthly, bonus, other, srs, donations, topSelf, topFamily, nsman, otherReliefs;
+    private int parentsWith, parentsApart;
+    private bool foreigner;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Pick(int y)
+    {
+        if (y == year) return;
+        year = y;
+        v = null;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        error = null;
+        try
+        {
+            Fill(v = await Api.Tax(year));
+        }
+        catch (ApiException e)
+        {
+            error = e.Message;
+        }
+    }
+
+    private void Fill(TaxView view)
+    {
+        var p = view.Plan;
+        employment = p.EmploymentIncomeOverride;
+        monthly = p.ExpectedMonthlyPay;
+        bonus = Blank(p.ExpectedBonus);
+        other = Blank(p.OtherIncome);
+        srs = Blank(p.SrsContributed);
+        donations = Blank(p.Donations);
+        topSelf = Blank(p.CpfTopUpSelf);
+        topFamily = Blank(p.CpfTopUpFamily);
+        nsman = Blank(p.NsmanRelief);
+        otherReliefs = Blank(p.OtherReliefs);
+        parentsWith = p.ParentsLivingWith;
+        parentsApart = p.ParentsNotLivingWith;
+        foreigner = p.Foreigner;
+    }
+
+    private static decimal? Blank(decimal d) => d == 0 ? null : Fmt.Trim(d);
+
+    private async Task Save()
+    {
+        if (busy) return;
+        formError = null;
+        if (parentsWith + parentsApart > 2)
+        {
+            formError = "Parent relief covers at most two parents.";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var plan = new TaxPlanDto(employment, monthly, bonus ?? 0, other ?? 0, srs ?? 0, topSelf ?? 0, topFamily ?? 0,
+                donations ?? 0, parentsWith, parentsApart, nsman ?? 0, otherReliefs ?? 0, foreigner);
+            var before = v?.Result.Tax;
+            Fill(v = await Api.SaveTax(year, plan));
+            Toast.Show(before is { } b && b != v.Result.Tax
+                ? $"Saved. Estimate is now {Fmt.Money(v.Result.Tax)} ({(v.Result.Tax < b ? "−" : "+")}{Fmt.Money(Math.Abs(v.Result.Tax - b))})."
+                : "Saved.");
+        }
+        catch (ApiException e)
+        {
+            formError = e.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string Day(DateOnly d) => d.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string TipTint(int i) => (i % 3) switch { 0 => "soft-mint", 1 => "soft-peach", _ => "soft-sky" };
+
+    private static string TipIcon(string key) => key switch
+    {
+        "srs" => "🏦",
+        "cpf-self" => "🌱",
+        "cpf-family" => "👪",
+        "parents" => "🤝",
+        "donate" => "🎁",
+        _ => "💡",
+    };
+}

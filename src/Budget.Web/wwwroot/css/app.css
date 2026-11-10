@@ -492,3 +492,24 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 
 .plan-item { align-items: flex-start; margin: 4px 0; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .plan-item input { margin-top: 2px; accent-color: var(--ready); }
+
+/* ---- Income tax ---- */
+.tax-dates { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tax-pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border-radius: 99px; font-size: 13px; font-weight: 600;
+    background: color-mix(in srgb, var(--surface) 75%, transparent); color: var(--text);
+}
+.tax-pill.soon { background: color-mix(in srgb, var(--butter) 22%, var(--surface)); }
+.tax-note p { line-height: 1.45; }
+.tax-tip { gap: 8px; }
+.tax-tip h2 { font-size: 17px; }
+.tax-tip p { line-height: 1.45; }
+.tax-save { font-size: 20px; font-weight: 750; color: var(--savings); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tax-catch {
+    font-size: 14px; padding: 10px 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--muted);
+}
+.tax-sub { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 18px 0 2px; }
+.tax-sub:first-of-type { margin-top: 4px; }
+.tax-disclaimer { margin: 6px 12px 10px; }
+.soft-link.soft-lilac { background: color-mix(in srgb, var(--locked) 10%, var(--surface)); }

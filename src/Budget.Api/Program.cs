@@ -28,6 +28,7 @@ builder.Services.AddScoped<PriceRefresher>();
 builder.Services.AddScoped<GoalService>();
 builder.Services.AddScoped<SavingsTransfers>();
 builder.Services.AddScoped<SafetyFund>();
+builder.Services.AddScoped<TaxPlanner>();
 builder.Services.AddScoped<MoneyAssistant>();
 builder.Services.AddHttpClient<IQuoteSource, YahooQuoteSource>(c =>
 {
@@ -86,6 +87,7 @@ api.MapSubscriptionEndpoints();
 api.MapGoalEndpoints();
 api.MapAskEndpoints();
 api.MapSavingsEndpoints();
+api.MapTaxEndpoints();
 
 // Unknown /api paths are a 404, not the app page.
 app.Map("/api/{**rest}", () => Results.NotFound());

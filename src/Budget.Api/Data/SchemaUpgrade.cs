@@ -485,6 +485,56 @@ public static class SchemaUpgrade
                       );
                       """, ct);
             }
+
+            // ---- Income tax plans (one row per income year) ----
+            if (!await TableExistsAsync(conn, "TaxPlans", sqlServer, ct))
+            {
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? """
+                      CREATE TABLE [TaxPlans] (
+                          [Id] int NOT NULL IDENTITY,
+                          [Year] int NOT NULL,
+                          [EmploymentIncomeOverride] decimal(18,2) NULL,
+                          [ExpectedMonthlyPay] decimal(18,2) NULL,
+                          [ExpectedBonus] decimal(18,2) NOT NULL,
+                          [OtherIncome] decimal(18,2) NOT NULL,
+                          [SrsContributed] decimal(18,2) NOT NULL,
+                          [CpfTopUpSelf] decimal(18,2) NOT NULL,
+                          [CpfTopUpFamily] decimal(18,2) NOT NULL,
+                          [Donations] decimal(18,2) NOT NULL,
+                          [ParentsLivingWith] int NOT NULL,
+                          [ParentsNotLivingWith] int NOT NULL,
+                          [NsmanRelief] decimal(18,2) NOT NULL,
+                          [OtherReliefs] decimal(18,2) NOT NULL,
+                          [Foreigner] bit NOT NULL,
+                          [UpdatedAtUtc] datetime2 NOT NULL,
+                          CONSTRAINT [PK_TaxPlans] PRIMARY KEY ([Id])
+                      );
+                      """
+                    : """
+                      CREATE TABLE "TaxPlans" (
+                          "Id" INTEGER NOT NULL CONSTRAINT "PK_TaxPlans" PRIMARY KEY AUTOINCREMENT,
+                          "Year" INTEGER NOT NULL,
+                          "EmploymentIncomeOverride" TEXT NULL,
+                          "ExpectedMonthlyPay" TEXT NULL,
+                          "ExpectedBonus" TEXT NOT NULL,
+                          "OtherIncome" TEXT NOT NULL,
+                          "SrsContributed" TEXT NOT NULL,
+                          "CpfTopUpSelf" TEXT NOT NULL,
+                          "CpfTopUpFamily" TEXT NOT NULL,
+                          "Donations" TEXT NOT NULL,
+                          "ParentsLivingWith" INTEGER NOT NULL,
+                          "ParentsNotLivingWith" INTEGER NOT NULL,
+                          "NsmanRelief" TEXT NOT NULL,
+                          "OtherReliefs" TEXT NOT NULL,
+                          "Foreigner" INTEGER NOT NULL,
+                          "UpdatedAtUtc" TEXT NOT NULL
+                      );
+                      """, ct);
+                await db.Database.ExecuteSqlRawAsync(sqlServer
+                    ? "CREATE UNIQUE INDEX [IX_TaxPlans_Year] ON [TaxPlans] ([Year]);"
+                    : "CREATE UNIQUE INDEX \"IX_TaxPlans_Year\" ON \"TaxPlans\" (\"Year\");", ct);
+            }
         }
         finally
         {

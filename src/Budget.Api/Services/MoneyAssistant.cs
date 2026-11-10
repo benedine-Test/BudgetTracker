@@ -78,6 +78,11 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
           money. Say in the answer what each goal frees up per pay period and what that adds up to. Don't
           suggest a goal they already have; suggest a new amount for it instead. Suggested goals appear
           under your answer with a Save button; they're only saved if the person taps it.
+        - Income tax: get_income_tax gives the Tax screen's estimate for a year (Singapore resident rates)
+          and what would lower it, each with the exact saving and its catch. Quote those figures rather
+          than working tax out yourself, always say the catch (SRS and CPF top-ups lock money away), and
+          remember it only counts what they've typed in on the Tax screen. Point them to Budget → Income tax
+          to fill in bonus, SRS, top-ups and reliefs.
         - Apart from suggesting goals, you can only read data. If they ask you to change something
           (record, move, delete), tell them where in the app to do it.
         - You give budgeting guidance, not regulated financial advice; for big decisions (loans,
@@ -142,6 +147,13 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                 ["reason"] = Prop("string", "One line on why, in their words, e.g. 'Frees S$80 a month for Mum and Dad'."),
             },
             ["kind", "amount", "name"]),
+        Tool("get_income_tax",
+            "Estimated Singapore income tax for an income year (2026 income = YA2027): income, reliefs, " +
+            "chargeable income, tax, marginal rate, and ways to lower it before 31 Dec with the exact saving of each.",
+            new()
+            {
+                ["year"] = Prop("integer", "The year the income was earned. Omit for this year."),
+            }),
         Tool("get_categories",
             "Every spending category and which bucket it counts in, plus the pay day and budget split settings.",
             new()),
@@ -295,6 +307,12 @@ public class MoneyAssistant(BudgetDbContext db, BudgetService budgets, AccountSe
                     return (Out(await goals.ListAsync(ct)), "Your goals", false);
                 case "suggest_goal":
                     return (await SuggestAsync(input, suggested), "", false); // not a lookup, so not listed as checked
+                case "get_income_tax":
+                {
+                    var year = Int(input, "year") ?? clock.Today.Year;
+                    if (year < 2020 || year > clock.Today.Year + 1) throw new ToolInputException("year must be from 2020 to next year.");
+                    return (Out(await new TaxPlanner(db, clock).ViewAsync(year, ct)), $"Income tax for {year}", false);
+                }
                 case "get_categories":
                 {
                     var s = await budgets.GetSettingsAsync(ct);

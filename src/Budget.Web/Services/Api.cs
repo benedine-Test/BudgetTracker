@@ -485,6 +485,15 @@ public class Api(HttpClient http)
 
     public Task<List<ReminderDto>> ReminderDone(int id) => Post<List<ReminderDto>>($"api/savings/reminders/{id}/done", new { });
 
+    // ---- Income tax ----
+    public Task<TaxView> Tax(int year) => Get<TaxView>($"api/tax?year={year}");
+
+    public async Task<TaxView> SaveTax(int year, TaxPlanDto plan)
+    {
+        using var r = await Send(HttpMethod.Put, $"api/tax/{year}", plan);
+        return (await r.Content.ReadFromJsonAsync<TaxView>(Json))!;
+    }
+
     // ---- Plumbing ----
     private async Task<T> Get<T>(string url)
     {
