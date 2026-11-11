@@ -1,0 +1,247 @@
+@page "/trends"
+@using System.Globalization
+@inject Api Api
+
+<PageTitle>Trends</PageTitle>
+
+<header class="topbar">
+    <div>
+        <h1>Trends</h1>
+        <p class="sub">@(v is null ? "How your spending changes over time" : v.Month.ToString("MMMM yyyy", Inv))</p>
+    </div>
+    <div class="pager">
+        <button type="button" class="icon-btn" aria-label="Previous month" disabled="@(v is null || AtFirst)" @onclick="() => Go(-1)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.4 8.4 12l6.6 6.6-1.4 1.4-8-8 8-8z" /></svg>
+        </button>
+        <button type="button" class="icon-btn" aria-label="Next month" disabled="@(v is null || AtLatest)" @onclick="() => Go(1)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5.4 6.6 6.6L9 18.6l1.4 1.4 8-8-8-8z" /></svg>
+        </button>
+    </div>
+</header>
+
+@if (error is not null)
+{
+    <ErrorBox Message="@error" OnRetry="Load" />
+}
+else if (v is null)
+{
+    <Loading />
+}
+else
+{
+    @* ---- This pay period against your usual ---- *@
+    var u = v.Usual;
+    <section class="card soft-lilac">
+        <h2>This pay period vs usual</h2>
+        <p class="muted">
+            Day @u.DaysGone of @u.DaysTotal (@Fmt.Range(u.PeriodStart, u.PeriodEndExclusive)).
+            @(u.PeriodsCompared switch
+            {
+                0 => "There's no earlier spending to compare with yet.",
+                1 => "Usual is your last pay period.",
+                _ => $"Usual is the average of your last {u.PeriodsCompared} pay periods."
+            })
+        </p>
+        @if (u.Items.Count == 0)
+        {
+            <p class="muted">No spending this pay period yet.</p>
+        }
+        else
+        {
+            var max = u.Items.Max(i => Math.Max(i.SoFar, i.Usual));
+            var pace = u.DaysTotal == 0 ? 0 : (decimal)u.DaysGone / u.DaysTotal;
+            <div class="usual-list">
+                @foreach (var i in u.Items)
+                {
+                    <div class="cat-row usual @Fmt.BucketClass(i.Bucket)">
+                        <div class="cat-head">
+                            <span>
+                                @i.Category
+                                @if (i.Status == "above") { <span class="tag warn">Past usual</span> }
+                                else if (i.Status == "fast") { <span class="tag warn">Spending fast</span> }
+                                else if (i.Status == "new") { <span class="tag">New</span> }
+                            </span>
+                            <span class="num">@Fmt.Money(i.SoFar, v.Currency)
+                                @if (u.PeriodsCompared > 0) { <span class="muted"> / @Fmt.Money(i.Usual, v.Currency)</span> }
+                            </span>
+                        </div>
+                        <div class="bar" aria-hidden="true">
+                            <span class="@(i.Status == "above" ? "over" : "")" style="width:@Pct(max, i.SoFar)"></span>
+                            @if (i.Usual > 0)
+                            {
+                                <i class="usual-mark" style="left:@Pct(max, i.Usual)"></i>
+                                <i class="pace-mark" style="left:@Pct(max, i.Usual * pace)"></i>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            @if (u.PeriodsCompared > 0)
+            {
+                <p class="muted small key"><i class="usual-mark"></i> your usual for a whole pay period · <i class="pace-mark"></i> where you'd usually be by today</p>
+            }
+        }
+    </section>
+
+    @* ---- Six months by bucket ---- *@
+    var top = Math.Max(1, v.Months.Max(m => m.Total));
+    <section class="card">
+        <h2>Last 6 months</h2>
+        <div class="months" role="list">
+            @foreach (var m in v.Months)
+            {
+                var sel = m.Month == v.Month;
+                <button type="button" role="listitem" class="month @(sel ? "on" : "")" @onclick="() => Show(m.Month)"
+                        aria-label="@m.Month.ToString("MMMM yyyy", Inv): @Fmt.Money(m.Total, v.Currency)" aria-pressed="@sel">
+                    <span class="month-total num">@Short(m.Total)</span>
+                    <span class="stack-col" style="height:@Pct(top, m.Total)">
+                        @if (m.Savings > 0) { <span class="seg savings" style="flex:@Flex(m.Savings)"></span> }
+                        @if (m.Other > 0) { <span class="seg other" style="flex:@Flex(m.Other)"></span> }
+                        @if (m.Wants > 0) { <span class="seg wants" style="flex:@Flex(m.Wants)"></span> }
+                        @if (m.Needs > 0) { <span class="seg needs" style="flex:@Flex(m.Needs)"></span> }
+                    </span>
+                    <span class="month-name">@m.Month.ToString("MMM", Inv)</span>
+                </button>
+            }
+        </div>
+        <ul class="trend-legend">
+            <li><span class="sw needs"></span>Needs</li>
+            <li><span class="sw wants"></span>Wants</li>
+            <li><span class="sw savings"></span>Savings</li>
+            @if (v.Months.Any(m => m.Other > 0)) { <li><span class="sw other"></span>Not sorted</li> }
+        </ul>
+        @{ var cur = v.Months[^1]; var before = v.Months[^2]; }
+        @if (before.Total > 0)
+        {
+            var spentNow = cur.Needs + cur.Wants + cur.Other;
+            var spentBefore = before.Needs + before.Wants + before.Other;
+            <p class="muted">
+                Spent (not counting savings) in @cur.Month.ToString("MMMM", Inv): @Fmt.Money(spentNow, v.Currency),
+                <span class="@(spentNow > spentBefore ? "neg" : "pos")">@Fmt.Money(Math.Abs(spentNow - spentBefore), v.Currency) @(spentNow > spentBefore ? "more" : "less")</span>
+                than @before.Month.ToString("MMMM", Inv)@(IsThisMonth ? " so far" : "").
+            </p>
+        }
+    </section>
+
+    @* ---- Calendar ---- *@
+    var dayMax = v.Days.Max(d => d.Total);
+    var spentDays = v.Days.Where(d => d.Date <= Fmt.Today).ToList();
+    <section class="card">
+        <h2>Spending calendar</h2>
+        <div class="cal" role="grid" aria-label="Spending per day in @v.Month.ToString("MMMM", Inv)">
+            @foreach (var w in Weekdays) { <span class="cal-dow" aria-hidden="true">@w</span> }
+            @for (var i = 0; i < Offset(v.Month); i++) { <span class="cal-pad"></span> }
+            @foreach (var d in v.Days)
+            {
+                var future = d.Date > Fmt.Today;
+                <button type="button" class="cal-day heat-@Heat(dayMax, d.Total) @(future ? "future" : "") @(picked == d.Date ? "on" : "")"
+                        disabled="@future" @onclick="() => picked = d.Date"
+                        aria-label="@d.Date.ToString("d MMMM", Inv): @Fmt.Money(d.Total, v.Currency)">
+                    @d.Date.Day
+                </button>
+            }
+        </div>
+        <div class="cal-foot">
+            <span class="heat-key" aria-hidden="true">Less <i class="heat-0"></i><i class="heat-1"></i><i class="heat-2"></i><i class="heat-3"></i><i class="heat-4"></i> More</span>
+        </div>
+        @if (v.Days.FirstOrDefault(d => d.Date == picked) is { } p)
+        {
+            <p class="cal-picked"><strong>@Fmt.Day(p.Date)</strong>: @Fmt.Money(p.Total, v.Currency) · @p.Count @(p.Count == 1 ? "entry" : "entries")</p>
+        }
+        else if (spentDays.Count > 0)
+        {
+            var biggest = spentDays.MaxBy(d => d.Total)!;
+            <dl class="cal-stats">
+                <dt>No-spend days</dt><dd class="num">@spentDays.Count(d => d.Total == 0) of @spentDays.Count</dd>
+                @if (biggest.Total > 0)
+                {
+                    <dt>Biggest day</dt><dd class="num">@biggest.Date.ToString("ddd d MMM", Inv) · @Fmt.Money(biggest.Total, v.Currency)</dd>
+                }
+                <dt>Weekends</dt><dd class="num">@Fmt.Money(spentDays.Where(d => d.Date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday).Sum(d => d.Total), v.Currency)</dd>
+                <dt>Weekdays</dt><dd class="num">@Fmt.Money(spentDays.Where(d => d.Date.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)).Sum(d => d.Total), v.Currency)</dd>
+            </dl>
+        }
+        <p class="muted small">Tap a day to see its total. Savings aren't counted here.</p>
+    </section>
+
+    @* ---- Top shops ---- *@
+    <section class="card">
+        <h2>Top shops in @v.Month.ToString("MMMM", Inv)</h2>
+        @if (v.Shops.Count == 0)
+        {
+            <p class="muted">No spending this month.</p>
+        }
+        else
+        {
+            var shopMax = v.Shops.Max(s => s.Total);
+            @foreach (var s in v.Shops)
+            {
+                var diff = s.Total - s.PreviousMonth;
+                <div class="cat-row">
+                    <div class="cat-head">
+                        <span>@s.Name <span class="muted">· @s.Count</span></span>
+                        <span class="num">@Fmt.Money(s.Total, v.Currency)</span>
+                    </div>
+                    <div class="bar thin shop-bar" aria-hidden="true"><span style="width:@Pct(shopMax, s.Total)"></span></div>
+                    <span class="muted small">
+                        @if (s.PreviousMonth == 0) { <text>Nothing here last month</text> }
+                        else if (diff == 0) { <text>Same as last month</text> }
+                        else { <span class="@(diff > 0 ? "neg" : "pos")">@(diff > 0 ? "▲" : "▼") @Fmt.Money(Math.Abs(diff), v.Currency)</span> <text> vs last month</text> }
+                    </span>
+                </div>
+            }
+        }
+    </section>
+}
+
+@code {
+    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+    private static readonly string[] Weekdays = ["M", "T", "W", "T", "F", "S", "S"];
+
+    private TrendsDto? v;
+    private string? error;
+    private DateOnly? month;
+    private DateOnly? picked;
+
+    private static DateOnly ThisMonth => new(Fmt.Today.Year, Fmt.Today.Month, 1);
+    private bool IsThisMonth => v?.Month == ThisMonth;
+    private bool AtLatest => v is not null && v.Month >= ThisMonth;
+    private bool AtFirst => v is not null && v.Month <= (v.FirstMonth ?? ThisMonth);
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        error = null;
+        try { v = await Api.Trends(month); }
+        catch (Exception e) { error = e.Message; }
+    }
+
+    private async Task Go(int step)
+    {
+        if (v is null) return;
+        await Show(v.Month.AddMonths(step));
+    }
+
+    private async Task Show(DateOnly m)
+    {
+        month = m;
+        picked = null;
+        await Load();
+    }
+
+    /// <summary>Monday-first: empty cells before the 1st.</summary>
+    private static int Offset(DateOnly first) => ((int)first.DayOfWeek + 6) % 7;
+
+    private static int Heat(decimal max, decimal total) =>
+        total <= 0 || max <= 0 ? 0 : (int)Math.Ceiling(total / max * 4);
+
+    private static string Pct(decimal max, decimal value) =>
+        (max <= 0 ? 0 : Math.Clamp(value / max * 100, 0, 100)).ToString("0.##", Inv) + "%";
+
+    private static string Flex(decimal value) => value.ToString("0.##", Inv);
+
+    /// <summary>"S$1.2k" over the bars, where full amounts don't fit.</summary>
+    private static string Short(decimal value) =>
+        value >= 1000 ? "$" + (value / 1000).ToString("0.#", Inv) + "k" : "$" + value.ToString("0", Inv);
+}

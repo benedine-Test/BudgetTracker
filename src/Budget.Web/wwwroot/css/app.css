@@ -513,3 +513,58 @@ table.proj td.even { background: color-mix(in srgb, var(--savings) 16%, transpar
 .tax-sub:first-of-type { margin-top: 4px; }
 .tax-disclaimer { margin: 6px 12px 10px; }
 .soft-link.soft-lilac { background: color-mix(in srgb, var(--locked) 10%, var(--surface)); }
+.soft-link.soft-sky { background: color-mix(in srgb, var(--sky) 9%, var(--surface)); }
+
+/* ---------- Trends ---------- */
+.usual-list { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.usual .bar { position: relative; overflow: visible; }
+.usual .bar > span { max-width: 100%; }
+.usual .cat-head .tag { margin-left: 6px; vertical-align: 1px; }
+.usual-mark, .pace-mark { position: absolute; top: -3px; width: 2px; height: 16px; border-radius: 2px; transform: translateX(-1px); background: var(--text); }
+.pace-mark { width: 0; background: none; border-left: 2px dotted var(--muted); }
+.key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.key .usual-mark, .key .pace-mark { position: static; display: inline-block; height: 12px; transform: none; }
+.usual .tag:not(.warn) { background: var(--track); color: var(--muted); }
+
+.months { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; height: 190px; margin-top: 14px; align-items: end; }
+.month { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px; height: 100%;
+    padding: 4px 0; border: 0; border-radius: 12px; background: transparent; }
+.month.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.month:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.month-total { font-size: 11px; color: var(--muted); }
+.month.on .month-total, .month.on .month-name { color: var(--text); font-weight: 700; }
+.month-name { font-size: 13px; color: var(--muted); }
+.stack-col { display: flex; flex-direction: column; width: 70%; max-width: 34px; min-height: 3px; max-height: calc(100% - 44px);
+    border-radius: 8px; overflow: hidden; background: var(--track); }
+.seg { display: block; min-height: 2px; }
+.seg.needs, .sw.needs { background: var(--needs); }
+.seg.wants, .sw.wants { background: var(--wants); }
+.seg.savings, .sw.savings { background: var(--savings); }
+.seg.other, .sw.other { background: var(--other); }
+.trend-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 8px; padding: 0; font-size: 13px; color: var(--muted); }
+.trend-legend li { display: flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; }
+
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; margin-top: 12px; }
+.cal-dow { text-align: center; font-size: 12px; color: var(--muted); padding-bottom: 2px; }
+.cal-day { aspect-ratio: 1; max-width: 100%; border: 0; border-radius: 9px; font-size: 13px; font-variant-numeric: tabular-nums;
+    display: grid; place-items: center; color: var(--text); }
+.cal-day.on { outline: 2px solid var(--text); outline-offset: 1px; }
+.cal-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cal-day.future { opacity: .35; cursor: default; }
+.heat-0 { background: var(--track); }
+.heat-1 { background: color-mix(in srgb, var(--wants) 22%, var(--surface)); }
+.heat-2 { background: color-mix(in srgb, var(--wants) 45%, var(--surface)); }
+.heat-3 { background: color-mix(in srgb, var(--wants) 70%, var(--surface)); }
+.heat-4 { background: var(--wants); color: var(--on-accent); }
+.cal-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.heat-key { display: flex; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); }
+.heat-key i { width: 12px; height: 12px; border-radius: 3px; }
+.cal-picked { margin: 10px 0 4px; font-size: 15px; }
+.cal-stats { display: grid; grid-template-columns: 1fr auto; margin: 10px 0 6px; font-size: 15px; }
+.cal-stats dt, .cal-stats dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.cal-stats dt { color: var(--muted); }
+.cal-stats dd { text-align: right; font-weight: 600; padding-left: 12px; }
+
+.shop-bar > span { background: var(--sky); }
+.usual .bar > span.over { background: var(--danger); }

@@ -192,6 +192,18 @@ public record ProjectionYear(int Year, DateOnly EndsOn, decimal PremiumsPaid, de
 
 public record ProjectionView(decimal GrossReturnPercent, decimal NetReturnPercent, DateOnly? FromStatement, List<ProjectionYear> Years);
 
+// ---- Trends ----
+
+public record MonthTotalDto(DateOnly Month, decimal Needs, decimal Wants, decimal Savings, decimal Other, decimal Total);
+public record DayTotalDto(DateOnly Date, decimal Total, int Count);
+public record ShopTotalDto(string Name, decimal Total, int Count, decimal PreviousMonth);
+/// <summary>Status: "above" | "fast" | "new" | "ok".</summary>
+public record CategoryVsUsualDto(string Category, string Bucket, decimal SoFar, decimal Usual, string Status);
+public record UsualDto(DateOnly PeriodStart, DateOnly PeriodEndExclusive, int DaysGone, int DaysTotal,
+    int PeriodsCompared, List<CategoryVsUsualDto> Items);
+public record TrendsDto(DateOnly Month, DateOnly? FirstMonth, string Currency, List<MonthTotalDto> Months,
+    List<DayTotalDto> Days, List<ShopTotalDto> Shops, UsualDto Usual);
+
 /// <summary>A problem worth showing to the person using the app, in plain words.</summary>
 public class ApiException(string message) : Exception(message);
 
@@ -205,6 +217,9 @@ public class Api(HttpClient http)
         Get<BudgetSummary>("api/budget/summary" + (date is { } d ? "?date=" + Fmt.Iso(d) : ""));
 
     public Task<List<BudgetSummary>> History() => Get<List<BudgetSummary>>("api/budget/history?take=12");
+
+    public Task<TrendsDto> Trends(DateOnly? month = null) =>
+        Get<TrendsDto>("api/trends" + (month is { } m ? "?month=" + m.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture) : ""));
 
     public Task<SettingsDto> Settings() => Get<SettingsDto>("api/settings");
 
