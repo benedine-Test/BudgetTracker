@@ -79,24 +79,26 @@ public class TaxPlanner(BudgetDbContext db, Clock clock)
         var cpfSoFar = entries.Sum(e => Payslip.EmployeeCpf(e.Gross, Band(e.Date)));
         var owSoFar = entries.Sum(e => Math.Min(e.Gross, Payslip.OrdinaryWageCeiling));
 
-        // Months still to be paid: those after the latest salary, up to December. A past year has none.
-        int monthsLeft;
-        if (year < today.Year) monthsLeft = 0;
-        else if (entries.Count > 0) monthsLeft = 12 - entries[^1].Date.Month;
-        else monthsLeft = year > today.Year ? 12 : 12 - today.Month + 1;
+        // The whole income year, Jan to Dec: every month without a salary entry is counted at the monthly
+        // pay, whether it's before or after the entries. A past year counts only what was recorded.
+        var monthsWithPay = entries.Select(e => e.Date.Month).ToHashSet();
+        List<DateOnly> gaps = year < today.Year ? []
+            : Enumerable.Range(1, 12).Where(m => !monthsWithPay.Contains(m)).Select(m => new DateOnly(year, m, 1)).ToList();
         var monthly = plan.ExpectedMonthlyPay ?? (entries.Count > 0 ? entries[^1].Gross : 0m);
-        if (monthsLeft > 0 && monthly <= 0)
+        if (gaps.Count > 0 && monthly <= 0)
         {
-            monthsLeft = 0;
-            notes.Add("No salary recorded this year yet. Type your monthly base pay below to count the rest of the year.");
+            gaps = [];
+            notes.Add("No salary recorded this year yet. Type your monthly base pay below to count the whole year.");
         }
-        if (entries.Count == 0 && monthsLeft > 0 && year == today.Year && today.Month > 1)
-            notes.Add($"No salary entries before {today:MMMM}; only {monthsLeft} month(s) are counted. If you were paid earlier in the year, type the year's total as your employment income.");
+        var latest = entries.Count > 0 ? entries[^1].Date.Month : 0;
+        var gapsBefore = gaps.Count(g => g.Month < latest || (latest == 0 && year == today.Year && g.Month < today.Month));
+        if (gapsBefore > 0)
+            notes.Add($"{gapsBefore} earlier month(s) have no salary entry and are counted at {monthly:#,0.##} each. If you weren't paid then (e.g. you started mid-year), type the year's total as your employment income.");
 
         var dec = new DateOnly(year, 12, 1);
-        var stillToCome = monthly * monthsLeft;
-        var cpfToCome = monthsLeft * Payslip.EmployeeCpf(monthly, Band(dec));
-        var ow = owSoFar + monthsLeft * Math.Min(monthly, Payslip.OrdinaryWageCeiling);
+        var stillToCome = monthly * gaps.Count;
+        var cpfToCome = gaps.Sum(g => Payslip.EmployeeCpf(monthly, Band(g)));
+        var ow = owSoFar + gaps.Count * Math.Min(monthly, Payslip.OrdinaryWageCeiling);
 
         // A bonus pays CPF up to the annual ceiling left after ordinary wages.
         var bonus = Math.Max(0, plan.ExpectedBonus);
@@ -118,7 +120,7 @@ public class TaxPlanner(BudgetDbContext db, Clock clock)
             return new TaxIncomeView(entries.Count, paidSoFar, cpfSoFar, 0, 0, 0, 0, typed, cpf, true);
         }
 
-        return new TaxIncomeView(entries.Count, Math.Round(paidSoFar, 2), cpfSoFar, monthsLeft, monthly,
+        return new TaxIncomeView(entries.Count, Math.Round(paidSoFar, 2), cpfSoFar, gaps.Count, monthly,
             Math.Round(stillToCome, 2), bonus,
             Math.Round(paidSoFar + stillToCome + bonus, 2), cpfSoFar + cpfToCome + bonusCpf, false);
     }

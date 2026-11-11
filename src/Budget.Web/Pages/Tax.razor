@@ -102,7 +102,7 @@ else
                 <dt>Salary so far <span class="muted small">@v.Income.SalaryEntries entries, before CPF</span></dt><dd>@Fmt.Money(v.Income.PaidSoFar)</dd>
                 @if (v.Income.MonthsLeft > 0)
                 {
-                    <dt>Still to come <span class="muted small">@v.Income.MonthsLeft × @Fmt.Money(v.Income.MonthlyPay)</span></dt><dd>@Fmt.Money(v.Income.StillToCome)</dd>
+                    <dt>Months without an entry <span class="muted small">@v.Income.MonthsLeft × @Fmt.Money(v.Income.MonthlyPay)</span></dt><dd>@Fmt.Money(v.Income.StillToCome)</dd>
                 }
                 @if (v.Income.Bonus > 0)
                 {

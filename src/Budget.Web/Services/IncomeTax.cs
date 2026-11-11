@@ -271,7 +271,7 @@ public record TaxPlanDto(
 /// <summary>How the year's employment income was worked out.</summary>
 /// <param name="SalaryEntries">Salary entries found in the year.</param>
 /// <param name="PaidSoFar">Base pay before CPF on those entries (worked back from take-home pay).</param>
-/// <param name="MonthsLeft">Salaries still to come this year, at <see cref="MonthlyPay"/>.</param>
+/// <param name="MonthsLeft">Months of the year (Jan to Dec) with no salary entry, counted at <see cref="MonthlyPay"/>.</param>
 /// <param name="FromOverride">The year's figure was typed in, so entries and projection aren't used.</param>
 public record TaxIncomeView(
     int SalaryEntries,

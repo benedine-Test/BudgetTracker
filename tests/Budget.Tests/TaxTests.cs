@@ -210,6 +210,40 @@ public class TaxPlannerTests
     }
 
     [Fact]
+    public void Monthly_pay_counts_the_whole_year_without_any_entries()
+    {
+        // 4,600 a month from January, typed in, in November with nothing recorded yet: 12 months, not 2.
+        var plan = TaxPlanner.Empty with { ExpectedMonthlyPay = 4_600 };
+        var v = TaxPlanner.Build(2026, new DateOnly(2026, 11, 10), plan, null, []);
+        Assert.Equal(12, v.Income.MonthsLeft);
+        Assert.Equal(55_200m, v.Income.EmploymentIncome);
+        Assert.Equal(12 * 920m, v.Income.EmployeeCpf);
+        Assert.Contains(v.Notes, n => n.Contains("10 earlier month(s)"));
+    }
+
+    [Fact]
+    public void Months_missing_between_entries_are_filled_too()
+    {
+        // Entries for Jan, Feb and Oct only: the 9 other months are counted at the monthly pay.
+        var paid = new List<(DateOnly, decimal)> { (new(2026, 1, 25), 4_800m), (new(2026, 2, 25), 4_800m), (new(2026, 10, 25), 4_800m) };
+        var plan = TaxPlanner.Empty with { ExpectedMonthlyPay = 6_000 };
+        var v = TaxPlanner.Build(2026, new DateOnly(2026, 11, 10), plan, null, paid);
+        Assert.Equal(3, v.Income.SalaryEntries);
+        Assert.Equal(9, v.Income.MonthsLeft);
+        Assert.InRange(v.Income.EmploymentIncome, 71_997m, 72_000m);
+        Assert.Contains(v.Notes, n => n.Contains("7 earlier month(s)"));
+    }
+
+    [Fact]
+    public void A_past_year_counts_only_its_entries()
+    {
+        var plan = TaxPlanner.Empty with { ExpectedMonthlyPay = 4_600 };
+        var v = TaxPlanner.Build(2026, new DateOnly(2027, 1, 5), plan, null, Paid(3));
+        Assert.Equal(0, v.Income.MonthsLeft);
+        Assert.InRange(v.Income.EmploymentIncome, 17_997m, 18_000m);
+    }
+
+    [Fact]
     public void No_salary_yet_asks_for_monthly_pay()
     {
         var v = TaxPlanner.Build(2026, new DateOnly(2026, 11, 10), TaxPlanner.Empty, null, []);
